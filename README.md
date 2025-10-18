@@ -10,24 +10,28 @@ corresponding lyrics, with an option for enhanced, word-by-word synchronized lyr
 * **Metadata Extraction**: Fetches video details from the YouTube API to determine song title, artist, album (if
   possible), and duration.
 * **Musixmatch Integration**: Communicates with the Musixmatch API to find and retrieve lyrics.
-* **LrcLib Integration**: Optionally uses the LrcLib API as an alternative or supplementary source for lyrics.
+* **LrcLib Integration**: Uses the LrcLib API as an alternative or supplementary source for lyrics.
 * **LRC Format Lyrics**: Provides lyrics in the standard LRC (timed lyrics) format.
-* **Enhanced Word-by-Word Sync**: Offers an "enhanced" mode that attempts to provide more granular, word-by-word
-  synchronized lyrics from Musixmatch's "richsync" feature. This includes a timestamp alignment process by comparing
-  with standard LRC timings.
+* **Word-by-Word Sync**: Offers word-by-word synchronized lyrics from Musixmatch.
 * **Caching**: Implements multiple layers of caching (YouTube API responses, Musixmatch API responses, final lyrics
   responses) to improve performance and reduce external API calls.
+* **Authentication**: Protects the API using Cloudflare Turnstile and JWTs to prevent abuse.
 
 ## How It Works
 
 When a request is made to the worker:
 
-1. **Request Handling (`index.ts`)**: The main worker script receives the incoming HTTP request. It handles `OPTIONS`
+1. **Authentication (`index.ts`, `auth.ts`)**:
+    * The client first completes a Cloudflare Turnstile challenge.
+    * The client then sends the Turnstile token to the `/verify-turnstile` endpoint.
+    * If the token is valid, the worker generates a JWT and sends it back to the client.
+    * The client then includes the JWT in the `Authorization` header for all subsequent requests to the main lyrics endpoint.
+2. **Request Handling (`index.ts`)**: The main worker script receives the incoming HTTP request. It handles `OPTIONS`
    requests for CORS preflight.
-2. **Parameter Processing (`GetLyrics.ts`)**:
+3. **Parameter Processing (`GetLyrics.ts`)**:
     * The core logic resides in `GetLyrics.ts`. It first checks a cache for a response to the identical request URL.
     * A `videoId` (YouTube Video ID) is a **required** query parameter.
-    * The `useLrcLib` parameter can be used to enable fetching from LrcLib.
+
     * **YouTube Metadata Fetch**: Using the `videoId` and a `GOOGLE_API_KEY` (configured in `wrangler.toml`), it queries
       the Google YouTube Data API v3 for video details (title, description, duration, channel title). These API
       responses are cached.
@@ -36,39 +40,58 @@ When a request is made to the worker:
       YouTube)
     * If essential song details (song title and artist) cannot be determined, it returns a 400 error if they aren't
       provided in the API call.
-3. **Lyric Fetching (`Musixmatch.ts`, `LrcLib.ts`)**:
-    * If `useLrcLib` is true, a request is sent to LrcLib to fetch lyrics.
+4. **Lyric Fetching (`Musixmatch.ts`, `LrcLib.ts`)**:
+    * A request is sent to LrcLib to fetch lyrics.
     * The `Musixmatch.ts` class manages all communication with the Musixmatch API.
     * **Token Management**: It handles the acquisition and refreshing of a `usertoken` required for Musixmatch API
       calls. Tokens and API responses are cached. It also manages cookies returned by Musixmatch.
     * **Track Matching**: It searches for the track on Musixmatch using the artist, song, and album information (derived
       from YouTube metadata or provided as optional query parameters).
     * **Lyric Fetching**:
-        * If the `enhanced=true` query parameter is present and Musixmatch has "richsync" (word-by-word) data for the
-          track, it fetches this data. It also fetches the standard LRC. An alignment process using `diffArrays`compares
-          character sequences and timings to calculate an `[offset:...]` for the richsync LRC, aiming for better
-          accuracy.
-        * If `enhanced=false` or richsync is unavailable, but standard LRC subtitles are available, it fetches those.
+        * It fetches word-by-word synchronized lyrics ("richsync") and standard LRC lyrics from Musixmatch.
         * If no lyrics are found, the lyrics field in the response will be `null`.
-4. **Response Generation (`GetLyrics.ts` & `index.ts`)**:
+5. **Response Generation (`GetLyrics.ts` & `index.ts`)**:
     * A JSON response is constructed containing the determined song `artist`, `song` title, `album` (if found),
       `duration`, the `videoId`, the original YouTube `description` (if relevant), the fetched `lyrics` (as an LRC
-      formatted string or `null`), and `debugInfo` (which can include lyric matching statistics if enhanced mode was
-      used).
-    * The response will also contain separate fields for Musixmatch and LrcLib lyrics if `useLrcLib` is enabled.
+      formatted string or `null`), and `debugInfo`.
+    * The response will also contain separate fields for Musixmatch and LrcLib lyrics.
     * This final response is cached. Responses containing lyrics are cached for up to 3 days (`max-age=259200`), while
       responses without lyrics are cached for 10 minutes (`max-age=600`).
     * The `index.ts` worker sets appropriate HTTP headers (including `Access-Control-Allow-Origin`) and returns the
       response.
 
-## API Endpoint
+## API Endpoints
 
-The worker exposes a single GET endpoint.
+### Authentication
 
-* **URL**: `/` (relative to your worker's deployed URL)
+*   **URL**: `/challenge`
+*   **Method**: `GET`
+*   **Description**: Returns a page with a Cloudflare Turnstile challenge.
+
+*   **URL**: `/verify-turnstile`
+*   **Method**: `POST`
+*   **Description**: Verifies a Turnstile token and returns a JWT if valid.
+*   **Body**:
+    ```json
+    {
+        "token": "YOUR_TURNSTILE_TOKEN"
+    }
+    ```
+*   **Success Response (200 OK)**:
+    ```json
+    {
+        "jwt": "YOUR_JWT"
+    }
+    ```
+
+### Lyrics
+
+* **URL**: `/lyrics` (relative to your worker's deployed URL)
 * **Method**: `GET`
+* **Headers**:
+    * `Authorization`: `Bearer YOUR_JWT`
 
-### Query Parameters:
+#### Query Parameters:
 
 * `videoId` (string, **required**): The YouTube video ID for the song.
     * Example: `dQw4w9WgXcQ`
@@ -78,15 +101,14 @@ The worker exposes a single GET endpoint.
   search.
 * `album` (string, optional): The album of the song. Used to improve Musixmatch search accuracy.
 * `duration` (string, optional): The duration of the song in seconds. Can be inferred from `videoId`.
-* `enhanced` (boolean, optional, default: `false`): If set to `true`, the worker will attempt to fetch word-by-word
-  synchronized lyrics and perform timestamp alignment.
-* `useLrcLib` (boolean, optional, default: `false`): If set to `true`, the worker will also fetch lyrics from LrcLib.
+* `alwaysFetchMetadata` (boolean, optional, default: `false`): If set to `true`, the worker will always fetch metadata from YouTube, even if song, artist, and album are provided.
 
-### Example Request:
 
-`GET /?song=Almost+Forgot&artist=Against+The+Current&duration=208&videoId=Y4gOQSZg5bQ&enhanced=true&useLrcLib=true`
+#### Example Request:
 
-### Success Response (200 OK):
+`GET /lyrics?song=Almost+Forgot&artist=Against+The+Current&duration=208&videoId=Y4gOQSZg5bQ`
+
+#### Success Response (200 OK):
 
 ```json
 {
@@ -109,7 +131,6 @@ The worker exposes a single GET endpoint.
             ]
         }
     },
-    "lyrics": "[offset:-0.015]\n[00:00.24] Oh, oh, oh...",
     "musixmatchWordByWordLyrics": "[offset:-0.015]\n[00:00.24] Oh, oh, oh...",
     "musixmatchSyncedLyrics": "[00:00.24]Oh, oh, oh...",
     "lrclibSyncedLyrics": "[00:00.24]Oh, oh, oh...",
@@ -117,7 +138,7 @@ The worker exposes a single GET endpoint.
 }
 ```
 
-*Error Response (e.g., 400 Bad Request):*
+*Error Response (e.g., 400 Bad Request):
 If `videoId` is missing or song/artist cannot be inferred:
 
 ```json
@@ -146,23 +167,26 @@ or
 1. *Clone the repository*
 
 2. Install dependencies:
-
-   ```bash
-   `npm install`
-   ```
+    ```bash
+       npm install
+    ```
 
 3. **Configure Local Development Secrets (`.dev.vars`)**:
    For local development using `wrangler dev`, secrets should be placed in a `.dev.vars` file in the root directory of
    your project. This file should **not** be committed to version control.
 
-   Create a file named `.dev.vars` in your project root and add your Google API Key:
+   Create a file named `.dev.vars` in your project root and add your secrets:
 
    ```ini
    GOOGLE_API_KEY="YOUR_GOOGLE_API_KEY_HERE"
+   TURNSTILE_SECRET_KEY="YOUR_TURNSTILE_SECRET_KEY_HERE"
+   JWT_SECRET="YOUR_JWT_SECRET_HERE"
    ```
 
    *Obtain a `GOOGLE_API_KEY` from the Google Cloud Console, ensuring the YouTube Data API v3 is enabled for your
    project.*
+   *Obtain a `TURNSTILE_SECRET_KEY` from your Cloudflare dashboard.*
+   *`JWT_SECRET` can be any long, random string.*
 
 ### Running Locally
 
@@ -175,7 +199,13 @@ or
    This will typically start a server on `http://localhost:8787`.
 
 2. Test in your browser or with a tool like curl:
-   Open `http://localhost:8787/?videoId=YOUR_YOUTUBE_VIDEO_ID`
+   *   For local development, you can bypass the authentication by setting the `BYPASS_AUTH` constant to `true` in `src/index.ts`.
+   *   If you want to test the authentication flow, first, complete the Turnstile challenge by visiting `http://localhost:8787/challenge`.
+   *   Then, use the obtained Turnstile token to get a JWT from `http://localhost:8787/verify-turnstile`.
+   *   Finally, use the JWT to make requests to the lyrics endpoint, e.g., `http://localhost:8787/lyrics?videoId=YOUR_YOUTUBE_VIDEO_ID`.
 
-   For example:
-   `http://localhost:8787/?videoId=Qd_Zcmlf4g4&enhanced=true&useLrcLib=true`
+   For example (with authentication bypass):
+   `curl "http://localhost:8787/lyrics?videoId=Qd_Zcmlf4g4"`
+
+   For example (with authentication):
+   `curl -H "Authorization: Bearer YOUR_JWT" "http://localhost:8787/lyrics?videoId=Qd_Zcmlf4g4"`

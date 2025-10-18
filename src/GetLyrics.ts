@@ -43,10 +43,10 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
         observe({ usingCachedLyrics: false });
     }
 
-    if (request.headers.get('User-Agent')?.toLowerCase() === 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36') {
-        await sleep(20000);
-        return new Response(JSON.stringify({}));
-    }
+    // if (request.headers.get('User-Agent')?.includes("Safari")) {
+    //     await sleep(20000);
+    //     return new Response(JSON.stringify({}));
+    // }
 
     let params = new URL(request.url).searchParams;
     let artist: string | null | undefined = params.get('artist');
@@ -56,6 +56,16 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
     let parsedSongAndArtist: string | null = null;
     let videoId = params.get("videoId");
     let alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
+    let useLrcLib = params.get('useLrcLib')?.toLowerCase() === 'true';
+
+    if (useLrcLib && alwaysFetchMetadata) {
+        await sleep(20000);
+        return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+            status: 403,
+        });
+    }
+
+    observe({endpoint: request.url});
 
     let description: string | null = null;
     const mx = new Musixmatch();

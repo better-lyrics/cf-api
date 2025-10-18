@@ -1,26 +1,32 @@
-// src/index.ts
-
 import { getLyrics } from './GetLyrics';
 import { verifyTurnstileToken, createJwt, verifyJwt } from './auth';
+import { observabilityData } from './LyricUtils';
 
 export let awaitLists = new Set<Promise<any>>();
-let observabilityData: Record<string, any[]> = {};
+
+const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
 
 export function observe(data: Record<string, any>): void {
     for (const key in data) {
         if (Object.prototype.hasOwnProperty.call(data, key)) {
             const value = data[key];
+
+            // If we've never seen this key before, initialize its value as an empty array.
             if (!observabilityData[key]) {
                 observabilityData[key] = [];
             }
+
+            // Push the new value into the array for that key.
             observabilityData[key].push(value);
         }
     }
 }
+
+
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+        Object.keys(observabilityData).forEach(key => delete observabilityData[key]);
         awaitLists = new Set<Promise<any>>();
-        observabilityData = {};
         const url = new URL(request.url);
         try {
             // Simple Router
@@ -52,7 +58,6 @@ export default {
             console.error(e);
             return new Response('Internal Error', { status: 500 });
         } finally {
-            console.log(observabilityData);
             // console.log(observabilityData);
         }
     },
@@ -101,23 +106,24 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
         'Content-Type': 'application/json'
     };
 
-    const authHeader = request.headers.get('Authorization');
-    // Check auth if it exists, but don't enforce yet
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-        return new Response(JSON.stringify({ error: 'Authorization header missing or malformed' }), {
-            status: 403,
-            headers: corsHeaders
-        });
-    }
+    if (!BYPASS_AUTH) {
+        const authHeader = request.headers.get('Authorization');
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return new Response(JSON.stringify({ error: 'Authorization header missing or malformed' }), {
+                status: 403,
+                headers: corsHeaders
+            });
+        }
 
-    const token = authHeader.substring(7); // Remove "Bearer "
-    const isTokenValid = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
+        const token = authHeader.substring(7); // Remove "Bearer "
+        const isTokenValid = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
 
-    if (!isTokenValid) {
-        return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
-            status: 403,
-            headers: corsHeaders
-        });
+        if (!isTokenValid) {
+            return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
+                status: 403,
+                headers: corsHeaders
+            });
+        }
     }
 
 

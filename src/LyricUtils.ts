@@ -1,4 +1,5 @@
 const possibleIdTags = ['ti', 'ar', 'al', 'au', 'lr', 'length', 'by', 'offset', 're', 'tool', 've', '#'];
+export let observabilityData: Record<string, any[]> = {};
 
 export function parseLrc(lrcText: string) {
     const lines = lrcText.split('\n');
