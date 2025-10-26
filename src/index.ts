@@ -37,7 +37,11 @@ export default {
                         'Access-Control-Allow-Origin': 'https://music.youtube.com',
                         'Access-Control-Allow-Credentials': 'true',
                         'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                        'Access-Control-Allow-Headers': 'Authorization, Content-Type'
+                        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+                        'Access-Control-Max-Age': '86400',
+                        'Cache-Control': 'public, max-age=86400',
+                        'Vary': 'Origin'
+
                     },
                 });
             }
@@ -129,7 +133,7 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
 
     // If token is valid, proceed to get the lyrics
     try {
-        let response = await getLyrics(request, env);
+        let response = await getLyrics(request, env, ctx);
         // Re-apply CORS headers to the final response
         response = new Response(response.body, response);
         Object.entries(corsHeaders).forEach(([key, value]) => {
