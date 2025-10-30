@@ -59,7 +59,7 @@ export async function createJwt(secretKey: string, ipAddress: string): Promise<s
     const header = { alg: 'HS256', typ: 'JWT' };
     const payload = {
         iat: Math.floor(Date.now() / 1000),
-        exp: Math.floor(Date.now() / 1000) + (60 * 60 * 1), // 1-hour expiration
+        exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24), // 24-hour expiration
         ip: ipAddress, // Bind the token to the user's IP address
     };
 
