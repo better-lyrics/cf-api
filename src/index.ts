@@ -4,7 +4,7 @@ import { observabilityData } from './LyricUtils';
 
 export let awaitLists = new Set<Promise<any>>();
 
-const BYPASS_AUTH = true; // Set to true to bypass authentication for local development
+const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
 
 export function observe(data: Record<string, any>): void {
     for (const key in data) {
