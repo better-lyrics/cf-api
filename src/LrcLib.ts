@@ -18,7 +18,7 @@ export interface LrcLibResponse {
 }
 
 
-export async function getLyricLibLyrics(artist: string, song: string, album: string | null, duration: string | null, useCached = false): Promise<LyricsResponse | null> {
+export async function getLyricLibLyrics(artist: string, song: string, album: string | null, duration: string | null | undefined, useCached = false): Promise<LyricsResponse | null> {
     let fetchUrl = new URL(LRCLIB_API);
     fetchUrl.searchParams.append('artist_name', artist);
     fetchUrl.searchParams.append('track_name', song);

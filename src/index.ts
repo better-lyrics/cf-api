@@ -4,7 +4,7 @@ import { observabilityData } from './LyricUtils';
 
 export let awaitLists = new Set<Promise<any>>();
 
-const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
+const BYPASS_AUTH = true; // Set to true to bypass authentication for local development
 
 export function observe(data: Record<string, any>): void {
     for (const key in data) {
@@ -133,7 +133,7 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
 
     // If token is valid, proceed to get the lyrics
     try {
-        let response = await getLyrics(request, env, ctx);
+        let response = await getLyrics(request, env);
         // Re-apply CORS headers to the final response
         response = new Response(response.body, response);
         Object.entries(corsHeaders).forEach(([key, value]) => {
