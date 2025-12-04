@@ -22,6 +22,17 @@ export function observe(data: Record<string, any>): void {
     }
 }
 
+let corsHeaders =  {
+    "Content-Type": "application/json",
+    'Access-Control-Allow-Origin': 'https://music.youtube.com',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Access-Control-Max-Age': '86400',
+    'Cache-Control': 'public, max-age=86400',
+    'Vary': 'Origin'
+};
+
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -38,17 +49,7 @@ export default {
             // Simple Router
             if (request.method === "OPTIONS") {
                 return new Response(null, {
-                    headers: {
-                        "Content-Type": "application/json",
-                        'Access-Control-Allow-Origin': 'https://music.youtube.com',
-                        'Access-Control-Allow-Credentials': 'true',
-                        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-                        'Access-Control-Max-Age': '86400',
-                        'Cache-Control': 'public, max-age=86400',
-                        'Vary': 'Origin'
-
-                    },
+                    headers: corsHeaders
                 });
             }
             if (url.pathname === '/challenge') {
@@ -75,12 +76,6 @@ export default {
 
 
 async function handleTurnstileVerification(request: Request, env: Env): Promise<Response> {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': 'https://music.youtube.com',
-        'Access-Control-Allow-Credentials': 'true',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-        'Content-Type': 'application/json'
-    };
     try {
         const body: { token: string } = await request.json();
         const turnstileToken = body.token;
@@ -109,13 +104,6 @@ async function handleTurnstileVerification(request: Request, env: Env): Promise<
 }
 
 async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const corsHeaders = {
-        'Access-Control-Allow-Origin': 'https://music.youtube.com',
-        'Access-Control-Allow-Credentials': 'true',
-        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-        'Content-Type': 'application/json'
-    };
-
     if (!BYPASS_AUTH) {
         const authHeader = request.headers.get('Authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
