@@ -1,33 +1,39 @@
 import { getLyrics } from './GetLyrics';
 import { verifyTurnstileToken, createJwt, verifyJwt } from './auth';
-import { observabilityData } from './LyricUtils';
 
 export let awaitLists = new Set<Promise<any>>();
 
 const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
 
+
+let observabilityData: Record<string, any[]> = {};
 export function observe(data: Record<string, any>): void {
+    // console.log(data);
     for (const key in data) {
-        if (Object.prototype.hasOwnProperty.call(data, key)) {
-            const value = data[key];
+        const value = data[key];
 
-            // If we've never seen this key before, initialize its value as an empty array.
-            if (!observabilityData[key]) {
-                observabilityData[key] = [];
-            }
-
-            // Push the new value into the array for that key.
-            observabilityData[key].push(value);
+        // If we've never seen this key before, initialize its value as an empty array.
+        if (!observabilityData[key]) {
+            observabilityData[key] = [];
         }
+
+        // Push the new value into the array for that key.
+        observabilityData[key].push(value);
     }
 }
 
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-        Object.keys(observabilityData).forEach(key => delete observabilityData[key]);
         awaitLists = new Set<Promise<any>>();
         const url = new URL(request.url);
+
+        const logObservabilityData = async () => {
+            await Promise.all(Array.from(awaitLists));
+            console.log(observabilityData);
+            Object.keys(observabilityData).forEach(key => delete observabilityData[key]);
+        };
+
         try {
             // Simple Router
             if (request.method === "OPTIONS") {
@@ -62,7 +68,7 @@ export default {
             console.error(e);
             return new Response('Internal Error', { status: 500 });
         } finally {
-            // console.log(observabilityData);
+            ctx.waitUntil(logObservabilityData());
         }
     },
 } satisfies ExportedHandler<Env>;
