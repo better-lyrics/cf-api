@@ -131,7 +131,9 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
         // Re-apply CORS headers to the final response
         response = new Response(response.body, response);
         Object.entries(corsHeaders).forEach(([key, value]) => {
-            response.headers.set(key, value);
+            if (!response.headers.has(key)) {
+                response.headers.set(key, value);
+            }
         });
         for (const awaitList of awaitLists) {
             ctx.waitUntil(awaitList);
