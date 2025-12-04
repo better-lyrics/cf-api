@@ -36,7 +36,12 @@ export class GoLyricsApi {
             observe({ 'goLyricsApiCache': { found: false, cacheUrl: cacheUrl } });
         }
 
-        const response = await fetch(url);
+        const response = await fetch(url, {
+            headers: {
+                "User-Agent": "Better Lyrics Cloudflare API",
+            },
+
+        });
 
         if (response.body === null) {
             return Promise.reject("Body is missing");
