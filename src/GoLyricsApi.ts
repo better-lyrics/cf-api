@@ -2,6 +2,7 @@
 import { awaitLists, observe } from './index';
 import { LyricsResponse } from './LyricUtils';
 import { getLyricsFromCache, saveLyricsToCache } from './GoLyricsApiCache';
+import { env } from 'cloudflare:workers';
 
 const Constants = {
     LYRICS_API_URL: "https://lyrics-api-go-better-lyrics-api-pr-12.up.railway.app/getLyrics"
@@ -39,6 +40,7 @@ export class GoLyricsApi {
         const response = await fetch(url, {
             headers: {
                 "User-Agent": "Better Lyrics Cloudflare API",
+                'X-API-KEY': env.GO_API_KEY
             },
 
         });
