@@ -43,7 +43,8 @@ export async function getLyricLibLyrics(artist: string, song: string, album: str
                 richSynced: null,
                 synced: lrcLibResponse.syncedLyrics,
                 unsynced: lrcLibResponse.plainLyrics,
-                debugInfo: null
+                debugInfo: null,
+                ttml: null
             };
         })
         .catch(err => {
