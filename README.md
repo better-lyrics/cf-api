@@ -209,3 +209,4 @@ or
 
    For example (with authentication):
    `curl -H "Authorization: Bearer YOUR_JWT" "http://localhost:8787/lyrics?videoId=Qd_Zcmlf4g4"`
+   
