@@ -3,7 +3,7 @@ import { verifyTurnstileToken, createJwt, verifyJwt } from './auth';
 
 export let awaitLists = new Set<Promise<any>>();
 
-const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
+const BYPASS_AUTH = true; // Set to true to bypass authentication for local development
 
 
 let observabilityData: Record<string, any[]> = {};
@@ -33,16 +33,34 @@ let corsHeaders =  {
     'Vary': 'Origin'
 };
 
+let headers =  {
+    "Content-Type": "application/json",
+    'Access-Control-Allow-Origin': 'https://music.youtube.com',
+    'Access-Control-Allow-Credentials': 'true',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
+    'Vary': 'Origin'
+};
+
+
 
 export default {
     async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
         awaitLists = new Set<Promise<any>>();
         const url = new URL(request.url);
+        observabilityData = {};
 
         const logObservabilityData = async () => {
-            await Promise.all(Array.from(awaitLists));
-            console.log(observabilityData);
-            Object.keys(observabilityData).forEach(key => delete observabilityData[key]);
+            await Promise.all(Array.from(awaitLists))
+                .catch((err: Error) => {
+                    console.error(err, err.stack);
+                });
+            try {
+                console.log(observabilityData);
+            } catch (e) {
+                console.error("Failed to write obs data", e);
+            }
+            // Object.keys(observabilityData).forEach(key => delete observabilityData[key]);
         };
 
         try {
@@ -65,8 +83,12 @@ export default {
             }
 
             return new Response('Not Found', { status: 404 });
-        } catch (e) {
-            console.error(e);
+        } catch (e: any) {
+            if (e instanceof Error) {
+                console.error(e, e.stack);
+            } else {
+                console.error(e);
+            }
             return new Response('Internal Error', { status: 500 });
         } finally {
             ctx.waitUntil(logObservabilityData());
@@ -83,7 +105,7 @@ async function handleTurnstileVerification(request: Request, env: Env): Promise<
         if (!turnstileToken) {
             return new Response(JSON.stringify({ error: 'Turnstile token not provided' }), {
                 status: 400,
-                headers: corsHeaders
+                headers: headers
             });
         }
 
@@ -95,7 +117,7 @@ async function handleTurnstileVerification(request: Request, env: Env): Promise<
         } else {
             return new Response(JSON.stringify({ error: 'Invalid Turnstile token' }), {
                 status: 401,
-                headers: corsHeaders
+                headers: headers
             });
         }
     } catch (e) {
@@ -109,7 +131,7 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return new Response(JSON.stringify({ error: 'Authorization header missing or malformed' }), {
                 status: 403,
-                headers: corsHeaders
+                headers: headers
             });
         }
 
@@ -119,7 +141,7 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
         if (!isTokenValid) {
             return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
                 status: 403,
-                headers: corsHeaders
+                headers: headers
             });
         }
     }
@@ -135,9 +157,6 @@ async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionCon
                 response.headers.set(key, value);
             }
         });
-        for (const awaitList of awaitLists) {
-            ctx.waitUntil(awaitList);
-        }
         return response;
     } catch (e) {
         console.error(e);
