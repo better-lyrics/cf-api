@@ -5,7 +5,7 @@ import { getLyricsFromCache, saveLyricsToCache } from './GoLyricsApiCache';
 import { env } from 'cloudflare:workers';
 
 const Constants = {
-    LYRICS_API_URL: "https://lyrics-api-go-better-lyrics-api-pr-12.up.railway.app/getLyrics"
+    LYRICS_API_URL: 'https://lyrics-api.boidu.dev/getLyrics'
 }
 
 export interface GoLyricsApiParameters {
