@@ -1,4 +1,5 @@
 import { Musixmatch } from './Musixmatch';
+import { GoLyricsApi } from './GoLyricsApi';
 import { awaitLists, observe } from './index';
 import { getLyricLibLyrics, LrcLibResponse } from './LrcLib';
 import { LyricsResponse } from './LyricUtils';
@@ -63,6 +64,7 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
 
     let description: string | null = null;
     const mx = new Musixmatch();
+    const goLyricsApi = new GoLyricsApi();
 
 
     // we'll use this to make sure we control the formatting of multi-artists
@@ -201,7 +203,8 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
         musixmatchWordByWordLyrics: null as any,
         musixmatchSyncedLyrics: null as any,
         lrclibSyncedLyrics: null as any,
-        lrclibPlainLyrics: null as any
+        lrclibPlainLyrics: null as any,
+        goLyricsApiTtml: null as any
     };
 
     let artistAlbumSongCombos: { artist: string, song: string, album: string | null }[] = [
@@ -243,6 +246,19 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
             mxmError = e;
         }
 
+        if (duration) {
+            let goLyrics = await goLyricsApi.getLrc(videoId, {
+                song: combo.song,
+                artist: combo.artist,
+                album: combo.album,
+                duration: duration
+            });
+            if (goLyrics) {
+                response.goLyricsApiTtml = goLyrics.ttml;
+            }
+        }
+
+
         const lrcLibLyrics = await lrcLibLyricsPromise;
         response.lrclibSyncedLyrics = lrcLibLyrics?.synced;
         response.lrclibPlainLyrics = lrcLibLyrics?.unsynced;
@@ -253,10 +269,11 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
             'hasLrcLibSynced': isTruthy(response.lrclibSyncedLyrics),
             'hasMusixmatchSynced': isTruthy(response.musixmatchSyncedLyrics),
             'hasLrcLibPlain': isTruthy(response.lrclibPlainLyrics),
+            'hasGoLyricsApiTtml': isTruthy(response.goLyricsApiTtml),
             'musixMatchError': mxmError
         });
 
-        if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics)) {
+        if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml)) {
             response.song = combo.song;
             response.artist = combo.artist;
             response.album = combo.album;
@@ -267,10 +284,11 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
     observe({
         combos: artistAlbumSongCombos,
         foundStats: foundStats,
-        foundSyncedLyrics: isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics),
+        foundSyncedLyrics: isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml),
         foundPlainLyrics: isTruthy(response.lrclibPlainLyrics),
         foundRichSyncedLyrics: isTruthy(response.musixmatchSyncedLyrics),
-        foundLyrics: isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.lrclibPlainLyrics),
+        foundTtml: isTruthy(response.goLyricsApiTtml),
+        foundLyrics: isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.lrclibPlainLyrics) || isTruthy(response.goLyricsApiTtml),
         response: response
     });
 
@@ -279,7 +297,7 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
     let json = JSON.stringify(response);
 
     let cacheableResponse = new Response(json, { status: 200 });
-    if (response.musixmatchSyncedLyrics || response.lrclibSyncedLyrics) {
+    if (response.musixmatchSyncedLyrics || response.lrclibSyncedLyrics || response.goLyricsApiTtml) {
         cacheableResponse.headers.set('Cache-control', 'public; max-age=259200');
     } else {
         // cache the request only for a short time
