@@ -3,9 +3,6 @@ import { verifyTurnstileToken, createJwt, verifyJwt } from './auth';
 
 export let awaitLists = new Set<Promise<any>>();
 
-const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
-
-
 let observabilityData: Record<string, any[]> = {};
 export function observe(data: Record<string, any>): void {
     // console.log(data);
@@ -126,7 +123,7 @@ async function handleTurnstileVerification(request: Request, env: Env): Promise<
 }
 
 async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (!BYPASS_AUTH) {
+    if (!(env.BYPASS_AUTH && env.BYPASS_AUTH === "true")) {
         const authHeader = request.headers.get('Authorization');
         if (!authHeader || !authHeader.startsWith('Bearer ')) {
             return new Response(JSON.stringify({ error: 'Authorization header missing or malformed' }), {
