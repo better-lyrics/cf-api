@@ -3,7 +3,7 @@ import { verifyTurnstileToken, createJwt, verifyJwt } from './auth';
 
 export let awaitLists = new Set<Promise<any>>();
 
-const BYPASS_AUTH = true; // Set to true to bypass authentication for local development
+const BYPASS_AUTH = false; // Set to true to bypass authentication for local development
 
 
 let observabilityData: Record<string, any[]> = {};
