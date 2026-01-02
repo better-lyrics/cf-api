@@ -260,12 +260,12 @@ export class Musixmatch {
         return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${hundredths.toString().padStart(2, '0')}`;
     }
 
-    private async getLrcWordByWord(trackId: string | number, lrcLyrics: Promise<LyricsResponse | null> | null):
+    private async getLrcWordByWord(trackId: string | number, lrcLyrics: Promise<LyricsResponse | null | void> | null):
         Promise<LyricsResponse | null> {
 
 
         let musixmatchBasicLyrics: Promise<LyricsResponse | null> = this.getLrcById(trackId);
-        let basicLrcPromise: Promise<LyricsResponse | null>;
+        let basicLrcPromise: Promise<LyricsResponse | null | void>;
         if (lrcLyrics !== null) {
             basicLrcPromise = lrcLyrics;
         } else {
@@ -343,7 +343,7 @@ export class Musixmatch {
                 return {
                     richSynced: null, synced: (await musixmatchBasicLyrics)?.synced, unsynced: null, debugInfo: {
                         comment: 'lyrics too long to diff'
-                    }
+                    }, ttml: null
                 };
             }
             let diff = diffArrays(parsedLrcTokenArray, richSyncTokenArray, { comparator: (left, right) => left.word.toLowerCase() === right.word.toLowerCase() });
@@ -385,14 +385,14 @@ export class Musixmatch {
                 return {
                     richSynced: lrcStr, synced: (await musixmatchBasicLyrics)?.synced, unsynced: null, debugInfo: {
                         lyricMatchingStats: { mean, variance, samples: basicLrcOffset, diff: diffDebug }
-                    }
+                    }, ttml: null
                 };
             } else {
                 return {
                     richSynced: null, synced: (await musixmatchBasicLyrics)?.synced, unsynced: null, debugInfo: {
                         lyricMatchingStats: { mean, variance, samples: basicLrcOffset, diff: diffDebug },
                         comment: 'basic lyrics matched but variance is too high; using basic lyrics instead'
-                    }
+                    }, ttml: null
                 };
             }
         }
@@ -400,7 +400,7 @@ export class Musixmatch {
         return {
             richSynced: lrcStr, synced: null, unsynced: null, debugInfo: {
                 comment: 'no synced basic lyrics found'
-            }
+            }, ttml: null
         };
 
 
@@ -424,11 +424,11 @@ export class Musixmatch {
 
         let lrcStr = data.message.body.subtitle.subtitle_body;
 
-        return { richSynced: null, synced: lrcStr, unsynced: null, debugInfo: null };
+        return { richSynced: null, synced: lrcStr, unsynced: null, debugInfo: null, ttml: null };
     }
 
 
-    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null> | null, tokenPromise: Promise<void>):
+    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null | void> | null, tokenPromise: Promise<void>):
         Promise<LyricsResponse | null> {
         // First try to get lyrics from the cache:
         let cachedLyrics = await getLyricsFromCache("youtube_music", videoId)
@@ -448,7 +448,7 @@ export class Musixmatch {
                 richSynced: richSynced, synced: normalSynced, unsynced: null, debugInfo: {
                     lyricMatchingStats: null,
                     comment: 'musixmatch cache'
-                }
+                }, ttml: null
             };
         }
 

@@ -30,7 +30,7 @@ type videoMetaType = {
     }]
 }
 
-function sleep(milliseconds: number) {
+function sleep(milliseconds: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, milliseconds));
 }
 
@@ -231,37 +231,57 @@ export async function getLyrics(request: Request, env: Env): Promise<Response> {
     let foundStats = [];
     for (let index in artistAlbumSongCombos) {
         let combo = artistAlbumSongCombos[index];
-        let lrcLibLyricsPromise = getLyricLibLyrics(combo.artist, combo.song, combo.album, duration);
+        let lrcLibLyricsPromise =
+            getLyricLibLyrics(combo.artist, combo.song, combo.album, duration)
+                .then(lyrics => {
+                    if (lyrics) {
+                        response.lrclibSyncedLyrics = lyrics.synced;
+                        response.lrclibPlainLyrics = lyrics.unsynced;
+                    }
+                    return lyrics;
+                });
+
+        let lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)])
 
         let mxmError = null;
+        let musixmatchLyrics = mx.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise)
+            .then(lyrics => {
+                if (lyrics) {
+                    response.musixmatchWordByWordLyrics = lyrics.richSynced;
+                    response.musixmatchSyncedLyrics = lyrics.synced;
+                    response.debugInfo = lyrics.debugInfo;
+                }
+            })
+            .catch(e => {
+                mxmError = e;
+            });
 
-        try {
-            let musixmatchLyrics = await mx.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibLyricsPromise, tokenPromise);
-            if (musixmatchLyrics) {
-                response.musixmatchWordByWordLyrics = musixmatchLyrics.richSynced;
-                response.musixmatchSyncedLyrics = musixmatchLyrics.synced;
-                response.debugInfo = musixmatchLyrics.debugInfo;
-            }
-        } catch (e) {
-            mxmError = e;
-        }
-
+        let goLyrics;
         if (duration) {
-            let goLyrics = await goLyricsApi.getLrc(videoId, {
+             goLyrics = goLyricsApi.getLrc(videoId, {
                 song: combo.song,
                 artist: combo.artist,
                 album: combo.album,
                 duration: duration
-            });
-            if (goLyrics) {
-                response.goLyricsApiTtml = goLyrics.ttml;
-            }
+            }).then(lyrics => {
+                if (lyrics) {
+                    response.goLyricsApiTtml = lyrics.ttml;
+                }
+             });
         }
 
 
-        const lrcLibLyrics = await lrcLibLyricsPromise;
-        response.lrclibSyncedLyrics = lrcLibLyrics?.synced;
-        response.lrclibPlainLyrics = lrcLibLyrics?.unsynced;
+        await Promise.all([goLyrics, musixmatchLyrics]);
+
+        let lrcLibTimeout;
+
+        if (response.goLyricsApiTtml) {
+            lrcLibTimeout = 4;
+        } else {
+            lrcLibTimeout = 0.5;
+        }
+
+        await Promise.race([lrcLibPromiseRace, sleep(lrcLibTimeout)]);
 
 
         foundStats.push({
