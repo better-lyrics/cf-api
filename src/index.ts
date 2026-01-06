@@ -1,164 +1,69 @@
-import { getLyrics } from './GetLyrics';
-import { verifyTurnstileToken, createJwt, verifyJwt } from './auth';
+import { fromHono, ApiException } from "chanfana";
+import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { Lyrics } from "./endpoints/Lyrics";
+import { VerifyTurnstile } from "./endpoints/VerifyTurnstile";
+import { DeleteCache } from "./endpoints/DeleteCache";
+import { flushObservability, resetObservability } from "./observability";
+import { Env } from "./types";
 
-export let awaitLists = new Set<Promise<any>>();
+const app = new Hono<{ Bindings: Env }>();
 
-let observabilityData: Record<string, any[]> = {};
-export function observe(data: Record<string, any>): void {
-    // console.log(data);
-    for (const key in data) {
-        const value = data[key];
+app.use('*', cors({
+  origin: 'https://music.youtube.com',
+  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowHeaders: ['Authorization', 'Content-Type'],
+  exposeHeaders: ['Content-Length'],
+  maxAge: 86400,
+  credentials: true,
+}));
 
-        // If we've never seen this key before, initialize its value as an empty array.
-        if (!observabilityData[key]) {
-            observabilityData[key] = [];
-        }
-
-        // Push the new value into the array for that key.
-        observabilityData[key].push(value);
+app.onError((err, c) => {
+    if (err instanceof ApiException) {
+        return c.json(
+            { success: false, errors: err.buildResponse() },
+            err.status as any,
+        );
     }
-}
 
-let corsHeaders =  {
-    "Content-Type": "application/json",
-    'Access-Control-Allow-Origin': 'https://music.youtube.com',
-    'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Access-Control-Max-Age': '86400',
-    'Cache-Control': 'public, max-age=86400',
-    'Vary': 'Origin'
-};
+    console.error("Global error handler caught:", err);
+    return c.json(
+        {
+            success: false,
+            errors: [{ code: 7000, message: "Internal Server Error" }],
+        },
+        500,
+    );
+});
 
-let headers =  {
-    "Content-Type": "application/json",
-    'Access-Control-Allow-Origin': 'https://music.youtube.com',
-    'Access-Control-Allow-Credentials': 'true',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-    'Vary': 'Origin'
-};
+// Setup OpenAPI registry
+const openapi = fromHono(app, {
+    docs_url: "/",
+    schema: {
+        info: {
+            title: "Better Lyrics API",
+            version: "1.0",
+            description: "API for fetching synchronized lyrics from multiple sources.",
+        },
+    },
+});
 
+openapi.get("/lyrics", Lyrics);
+openapi.post("/verify-turnstile", VerifyTurnstile);
+openapi.delete("/cache", DeleteCache);
 
+// Manual route for assets
+app.get("/challenge", (c) => {
+    return c.env.ASSETS.fetch(c.req.raw);
+});
 
 export default {
-    async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-        awaitLists = new Set<Promise<any>>();
-        const url = new URL(request.url);
-        observabilityData = {};
-
-        const logObservabilityData = async () => {
-            await Promise.all(Array.from(awaitLists))
-                .catch((err: Error) => {
-                    console.error(err, err.stack);
-                });
-            try {
-                console.log(observabilityData);
-            } catch (e) {
-                console.error("Failed to write obs data", e);
-            }
-            // Object.keys(observabilityData).forEach(key => delete observabilityData[key]);
-        };
-
+    fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
+        resetObservability();
         try {
-            // Simple Router
-            if (request.method === "OPTIONS") {
-                return new Response(null, {
-                    headers: corsHeaders
-                });
-            }
-            if (url.pathname === '/challenge') {
-                return env.ASSETS.fetch(request);
-            }
-
-            if (url.pathname === '/verify-turnstile' && request.method === 'POST') {
-                return handleTurnstileVerification(request, env);
-            }
-
-            if (url.pathname === '/' || url.pathname === "/lyrics") {
-                return handleLyricsRequest(request, env, ctx);
-            }
-
-            return new Response('Not Found', { status: 404 });
-        } catch (e: any) {
-            if (e instanceof Error) {
-                console.error(e, e.stack);
-            } else {
-                console.error(e);
-            }
-            return new Response('Internal Error', { status: 500 });
+            return await app.fetch(request, env, ctx);
         } finally {
-            ctx.waitUntil(logObservabilityData());
-        }
-    },
-} satisfies ExportedHandler<Env>;
-
-
-async function handleTurnstileVerification(request: Request, env: Env): Promise<Response> {
-    try {
-        const body: { token: string } = await request.json();
-        const turnstileToken = body.token;
-
-        if (!turnstileToken) {
-            return new Response(JSON.stringify({ error: 'Turnstile token not provided' }), {
-                status: 400,
-                headers: headers
-            });
-        }
-
-        const isValid = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET_KEY);
-
-        if (isValid) {
-            const jwt = await createJwt(env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
-            return new Response(JSON.stringify({ jwt }), { status: 200, headers: corsHeaders });
-        } else {
-            return new Response(JSON.stringify({ error: 'Invalid Turnstile token' }), {
-                status: 401,
-                headers: headers
-            });
-        }
-    } catch (e) {
-        return new Response(JSON.stringify({ error: 'An error occurred' }), { status: 500, headers: corsHeaders });
-    }
-}
-
-async function handleLyricsRequest(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    if (!(env.BYPASS_AUTH && env.BYPASS_AUTH === "true")) {
-        const authHeader = request.headers.get('Authorization');
-        if (!authHeader || !authHeader.startsWith('Bearer ')) {
-            return new Response(JSON.stringify({ error: 'Authorization header missing or malformed' }), {
-                status: 403,
-                headers: headers
-            });
-        }
-
-        const token = authHeader.substring(7); // Remove "Bearer "
-        const isTokenValid = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
-
-        if (!isTokenValid) {
-            return new Response(JSON.stringify({ error: 'Invalid or expired token' }), {
-                status: 403,
-                headers: headers
-            });
+            ctx.waitUntil(flushObservability());
         }
     }
-
-
-    // If token is valid, proceed to get the lyrics
-    try {
-        let response = await getLyrics(request, env);
-        // Re-apply CORS headers to the final response
-        response = new Response(response.body, response);
-        Object.entries(corsHeaders).forEach(([key, value]) => {
-            if (!response.headers.has(key)) {
-                response.headers.set(key, value);
-            }
-        });
-        return response;
-    } catch (e) {
-        console.error(e);
-        return new Response('An internal error occurred', { status: 500, headers: corsHeaders });
-    }
-}
-
-
+};

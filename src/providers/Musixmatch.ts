@@ -1,11 +1,9 @@
 // Types for our responses and data
-import { awaitLists, observe } from './index';
-import { Diff, diffArrays } from 'diff';
-import { LyricsResponse, parseLrc } from './LyricUtils';
-import { getLyricsFromCache, saveLyricsToCache } from './MusixmatchCache';
-import { env } from 'cloudflare:workers';
-
-
+import { awaitLists, observe } from '../observability';
+import { diffArrays } from 'diff';
+import { LyricsResponse, parseLrc } from '../LyricUtils';
+import { CacheService, Lyric } from '../services/CacheService';
+import { Env } from '../types';
 
 interface MusixmatchResponse {
     message: Message;
@@ -132,17 +130,25 @@ export interface MatchingTimedWord {
     wordTime: number;
 }
 
-
 // These fields can persist through multiple requests to the API
 let token: string | null = null; // null means we haven't gotten a token yet
 let tokenRetryCount = 0;
 let tokenRetryMax = 3;
 
+const DEFAULT_REFETCH_THRESHOLD = 7 * 86400; // 1 week
+const DEFAULT_REFETCH_CHANCE = 0.2; // 20% chance if old
+
 export class Musixmatch {
     private cookies: { key: string, cookie: string }[] = [];
     private readonly ROOT_URL = 'https://apic-desktop.musixmatch.com/ws/1.1/';
-
     private cache = caches.default;
+    private cacheService: CacheService;
+    private env: Env;
+
+    constructor(env: Env) {
+        this.env = env;
+        this.cacheService = new CacheService(env);
+    }
 
     private async _get(action: string, query: [string, string][]): Promise<Response> {
         query.push(['app_id', 'web-desktop-app-v1.0']);
@@ -183,9 +189,7 @@ export class Musixmatch {
                 }).join(";");
             }
 
-            // console.log('cookie', headers['Cookie']);
-
-            response = await fetch(url, {
+            response = await fetch(url.toString(), {
                 headers,
                 redirect: "manual",
             });
@@ -202,7 +206,9 @@ export class Musixmatch {
                 },
             );
             const location = response.headers.get('Location');
-            url = new URL("https://apic-desktop.musixmatch.com" + location);
+            if (location) {
+                url = new URL("https://apic-desktop.musixmatch.com" + location);
+            }
             loopCount += 1;
             if (loopCount > 5) {
                 throw new Error("too many redirects");
@@ -430,32 +436,57 @@ export class Musixmatch {
 
     async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null | void> | null, tokenPromise: Promise<void>):
         Promise<LyricsResponse | null> {
-        // First try to get lyrics from the cache:
-        let cachedLyrics = await getLyricsFromCache("youtube_music", videoId)
-        if (cachedLyrics !== null) {
-            let richSynced: string | null = null;
-            let normalSynced: string | null = null;
+        
+        // 1. Check Negative Cache
+        const isNegative = await this.cacheService.getNegative('youtube_music', videoId);
+        if (isNegative) {
+            observe({ 'musixmatchNegativeCacheHit': true });
+            return null;
+        }
 
-            for (const lyric of cachedLyrics) {
-                if (lyric.format == "rich_sync") {
-                    richSynced = lyric.content;
-                } else if (lyric.format == "normal_sync") {
-                    normalSynced = lyric.content;
+        // 2. Check Positive Cache
+        let cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
+        let forceRefetch = false;
+
+        if (cachedData) {
+            // Check stale
+            const now = Math.floor(Date.now() / 1000);
+            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
+            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
+
+            if (now - cachedData.lastUpdatedAt > threshold) {
+                if (Math.random() < chance) {
+                    forceRefetch = true;
+                    observe({ 'musixmatchCacheRefetch': true });
                 }
             }
 
-            return {
-                richSynced: richSynced, synced: normalSynced, unsynced: null, debugInfo: {
-                    lyricMatchingStats: null,
-                    comment: 'musixmatch cache'
-                }, ttml: null
-            };
+            if (!forceRefetch) {
+                let richSynced: string | null = null;
+                let normalSynced: string | null = null;
+
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "rich_sync") {
+                        richSynced = lyric.content;
+                    } else if (lyric.format == "normal_sync") {
+                        normalSynced = lyric.content;
+                    }
+                }
+
+                return {
+                    richSynced: richSynced, synced: normalSynced, unsynced: null, debugInfo: {
+                        lyricMatchingStats: null,
+                        comment: 'musixmatch cache'
+                    }, ttml: null
+                };
+            }
         }
 
+        // 3. Fetch from API
         await tokenPromise;
         observe({ 'musixMatchHasValidToken': token !== null });
         if (token === null) {
-            return null;
+             return null;
         }
 
         let query: [string, string][] = [
@@ -472,9 +503,6 @@ export class Musixmatch {
 
         let data = await response.json() as MusixmatchResponse;
         if (data.message.header.status_code === 401) {
-            // The token is not valid
-            // we're not going to retry b/c testing shows this won't work
-            // instead just set it to null so the next request can try again
             token = null;
         }
         if (data.message.header.status_code !== 200) {
@@ -485,6 +513,10 @@ export class Musixmatch {
                 header: data.message.header
                 }
             });
+            // Negative Cache Save (if 404 or similar, but here status 404 from matcher means not found)
+            if (data.message.header.status_code === 404) {
+                awaitLists.add(this.cacheService.saveNegative('youtube_music', videoId));
+            }
             return null;
         }
 
@@ -507,7 +539,7 @@ export class Musixmatch {
         if (result) {
             if (result.richSynced) {
                 awaitLists.add(
-                    saveLyricsToCache({
+                    this.cacheService.saveMusixmatchLyrics({
                         musixmatch_track_id: Number(trackId),
                         source_platform: "youtube_music",
                         source_track_id: videoId,
@@ -518,7 +550,7 @@ export class Musixmatch {
             }
             if (result.synced) {
                 awaitLists.add(
-                    saveLyricsToCache({
+                    this.cacheService.saveMusixmatchLyrics({
                         musixmatch_track_id: Number(trackId),
                         source_platform: "youtube_music",
                         source_track_id: videoId,
@@ -527,14 +559,17 @@ export class Musixmatch {
                     })
                 );
             }
+        } else {
+            // Matcher found track, but no lyrics found in it?
+            // Maybe not, maybe just no lyrics YET.
+            // But we can negative cache it for a while.
+            // Let's assume yes.
+             awaitLists.add(this.cacheService.saveNegative('youtube_music', videoId));
         }
-
-
 
         return result;
     }
 }
-
 
 
 function meanAndVariance(arr: number[]) {

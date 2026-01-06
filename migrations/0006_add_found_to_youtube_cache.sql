@@ -1,0 +1,1 @@
+ALTER TABLE youtube_cache ADD COLUMN found INTEGER DEFAULT 1;

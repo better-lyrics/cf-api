@@ -8,6 +8,7 @@ declare namespace Cloudflare {
 		TURNSTILE_SECRET_KEY: string;
 		GO_API_KEY: string;
 		BYPASS_AUTH: string;
+		ADMIN_KEYS: string;
 		LYRICS_BUCKET: R2Bucket;
 		DB: D1Database;
 		ASSETS: Fetcher;

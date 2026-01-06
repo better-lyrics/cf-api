@@ -1,6 +1,6 @@
 // src/auth.ts
 
-import { observe } from './index';
+import { observe } from './observability';
 
 interface TurnstileVerificationResponse {
     'success': boolean;

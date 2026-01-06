@@ -16,7 +16,11 @@
     "dependencies": {
         "@cloudflare/vitest-pool-workers": "^0.8.68",
         "@types/pako": "^2.0.4",
+        "chanfana": "^2.8.3",
         "diff": "^7.0.0",
-        "pako": "^2.1.0"
+        "hono": "^4.11.3",
+        "itty-router": "^5.0.22",
+        "pako": "^2.1.0",
+        "zod": "^3.25.76"
     }
 }
