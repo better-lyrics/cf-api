@@ -1,4 +1,4 @@
-import { awaitLists, observe } from "../observability";
+import { addAwait, observe } from "../observability";
 import { Env } from "../types";
 
 const youtubeSnippetAPI = "https://www.googleapis.com/youtube/v3/videos";
@@ -97,7 +97,7 @@ export class MetadataService {
             const updateTimestampPromise = this.env.DB.prepare(
                 'UPDATE youtube_cache SET last_accessed_at = ?1 WHERE video_id = ?2'
             ).bind(now, videoId).run();
-            awaitLists.add(updateTimestampPromise);
+            addAwait(updateTimestampPromise);
         }
 
         return {

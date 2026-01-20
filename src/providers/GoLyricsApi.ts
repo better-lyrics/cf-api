@@ -1,4 +1,4 @@
-import { awaitLists, observe } from '../observability';
+import { addAwait, observe } from '../observability';
 import { LyricsResponse } from '../LyricUtils';
 import { CacheService } from '../services/CacheService';
 import { Env } from '../types';
@@ -65,7 +65,7 @@ export class GoLyricsApi {
 
         if (newResponse.status === 200) {
             newResponse.headers.set('Cache-control', 'public; max-age=604800');
-            awaitLists.add(this.cache.put(cacheUrl, newResponse));
+            addAwait(this.cache.put(cacheUrl, newResponse));
         }
 
         return new Response(teeBody[0], newResponse);
@@ -121,7 +121,7 @@ export class GoLyricsApi {
                 }
             });
             if (response.status === 404) {
-                 awaitLists.add(this.cacheService.saveNegative('golyrics', videoId));
+                 addAwait(this.cacheService.saveNegative('golyrics', videoId));
             }
             return null;
         }
@@ -129,7 +129,7 @@ export class GoLyricsApi {
         const ttml = await response.text();
 
         if (ttml) {
-            awaitLists.add(
+            addAwait(
                 this.cacheService.saveGoLyrics({
                     source_track_id: videoId,
                     source_platform: "youtube_music",
@@ -138,7 +138,7 @@ export class GoLyricsApi {
                 })
             );
         } else {
-             awaitLists.add(this.cacheService.saveNegative('golyrics', videoId));
+             addAwait(this.cacheService.saveNegative('golyrics', videoId));
         }
 
         return {

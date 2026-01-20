@@ -1,6 +1,6 @@
 import { Env } from '../types';
 import pako from 'pako';
-import { awaitLists, observe } from '../observability';
+import { addAwait, observe } from '../observability';
 
 export type LyricType = 'rich_sync' | 'normal_sync' | 'ttml';
 export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib';
@@ -60,7 +60,7 @@ export class CacheService {
         // Update access time
         const now = Math.floor(Date.now() / 1000);
         if (now - lastAccessedAt > 86400) {
-            awaitLists.add(
+            addAwait(
                 this.env.DB.prepare("UPDATE tracks SET last_accessed_at = ?1 WHERE id = ?2")
                     .bind(now, internalTrackId).run()
             );
@@ -135,7 +135,7 @@ export class CacheService {
 
         const now = Math.floor(Date.now() / 1000);
         if (now - result.last_accessed_at > 86400) {
-             awaitLists.add(
+             addAwait(
                 this.env.DB.prepare("UPDATE go_lyrics_cache SET last_accessed_at = ?1 WHERE video_id = ?2 AND source_platform = ?3")
                 .bind(now, source_track_id, source_platform).run()
             );

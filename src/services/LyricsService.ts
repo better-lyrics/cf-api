@@ -3,7 +3,7 @@ import { MetadataService } from './MetadataService';
 import { Musixmatch } from '../providers/Musixmatch';
 import { GoLyricsApi } from '../providers/GoLyricsApi';
 import { LrcLib } from '../providers/LrcLib';
-import { observe, awaitLists } from '../observability';
+import { observe } from '../observability';
 import { LyricsResponse } from '../LyricUtils'; // Interface
 import { isTruthy, sleep } from '../utils';
 

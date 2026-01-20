@@ -1,5 +1,5 @@
 // Types for our responses and data
-import { awaitLists, observe } from '../observability';
+import { addAwait, observe } from '../observability';
 import { diffArrays } from 'diff';
 import { LyricsResponse, parseLrc } from '../LyricUtils';
 import { CacheService, Lyric } from '../services/CacheService';
@@ -230,7 +230,7 @@ export class Musixmatch {
             } else {
                 response.headers.set('Cache-control', 'public; max-age=604800');
             }
-            awaitLists.add(this.cache.put(cacheUrl, response));
+            addAwait(this.cache.put(cacheUrl, response));
         }
 
         return new Response(teeBody[0], response);
@@ -515,7 +515,7 @@ export class Musixmatch {
             });
             // Negative Cache Save (if 404 or similar, but here status 404 from matcher means not found)
             if (data.message.header.status_code === 404) {
-                awaitLists.add(this.cacheService.saveNegative('youtube_music', videoId));
+                addAwait(this.cacheService.saveNegative('youtube_music', videoId));
             }
             return null;
         }
@@ -538,7 +538,7 @@ export class Musixmatch {
 
         if (result) {
             if (result.richSynced) {
-                awaitLists.add(
+                addAwait(
                     this.cacheService.saveMusixmatchLyrics({
                         musixmatch_track_id: Number(trackId),
                         source_platform: "youtube_music",
@@ -549,7 +549,7 @@ export class Musixmatch {
                 );
             }
             if (result.synced) {
-                awaitLists.add(
+                addAwait(
                     this.cacheService.saveMusixmatchLyrics({
                         musixmatch_track_id: Number(trackId),
                         source_platform: "youtube_music",
@@ -564,13 +564,12 @@ export class Musixmatch {
             // Maybe not, maybe just no lyrics YET.
             // But we can negative cache it for a while.
             // Let's assume yes.
-             awaitLists.add(this.cacheService.saveNegative('youtube_music', videoId));
+             addAwait(this.cacheService.saveNegative('youtube_music', videoId));
         }
 
         return result;
     }
 }
-
 
 function meanAndVariance(arr: number[]) {
     const mean = arr.reduce((acc, val) => acc + val, 0) / arr.length;

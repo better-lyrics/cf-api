@@ -4,7 +4,7 @@ import { cors } from "hono/cors";
 import { Lyrics } from "./endpoints/Lyrics";
 import { VerifyTurnstile } from "./endpoints/VerifyTurnstile";
 import { DeleteCache } from "./endpoints/DeleteCache";
-import { flushObservability, resetObservability } from "./observability";
+import { flushObservability, runWithObservability } from "./observability";
 import { Env } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -59,11 +59,12 @@ app.get("/challenge", (c) => {
 
 export default {
     fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
-        resetObservability();
-        try {
-            return await app.fetch(request, env, ctx);
-        } finally {
-            ctx.waitUntil(flushObservability());
-        }
+        return runWithObservability(async () => {
+            try {
+                return await app.fetch(request, env, ctx);
+            } finally {
+                ctx.waitUntil(flushObservability());
+            }
+        });
     }
 };

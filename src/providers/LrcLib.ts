@@ -1,5 +1,5 @@
 import { LyricsResponse } from '../LyricUtils';
-import { observe, awaitLists } from '../observability';
+import { observe, addAwait } from '../observability';
 import { CacheService } from '../services/CacheService';
 import { Env } from '../types';
 
@@ -47,7 +47,7 @@ export class LrcLib {
             });
 
             if (res.status === 404) {
-                 awaitLists.add(this.cacheService.saveNegative('lrclib', videoId));
+                 addAwait(this.cacheService.saveNegative('lrclib', videoId));
                  return null;
             }
 

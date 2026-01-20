@@ -2,6 +2,7 @@
 name = "better-lyrics-cf-api"
 main = "src/index.ts"
 compatibility_date = "2025-01-09"
+compatibility_flags = ["nodejs_compat"]
 preview_urls = true
 
 # Workers Logs
