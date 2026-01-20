@@ -9,6 +9,8 @@ declare namespace Cloudflare {
 		GO_API_KEY: string;
 		BYPASS_AUTH: string;
 		ADMIN_KEYS: string;
+		NEGATIVE_CACHE_TTL_LRCLIB?: string;
+		NEGATIVE_CACHE_TTL_MUSIXMATCH?: string;
 		LYRICS_BUCKET: R2Bucket;
 		DB: D1Database;
 		ASSETS: Fetcher;

@@ -18,16 +18,14 @@ export interface LrcLibResponse {
 
 export class LrcLib {
     private cacheService: CacheService;
+    private env: Env;
 
     constructor(env: Env) {
+        this.env = env;
         this.cacheService = new CacheService(env);
     }
 
-    async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LyricsResponse | null> {
-        if (await this.cacheService.getNegative('lrclib', videoId)) {
-            return null;
-        }
-
+    private async fetchAndSave(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LyricsResponse | null> {
         let fetchUrl = new URL(LRCLIB_API);
         fetchUrl.searchParams.append('artist_name', artist);
         fetchUrl.searchParams.append('track_name', song);
@@ -57,6 +55,11 @@ export class LrcLib {
             }
 
             const json = await res.json() as LrcLibResponse;
+            
+            // If we found lyrics, ensure negative cache is cleared
+            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                .bind('lrclib', videoId).run());
+
             return {
                 richSynced: null,
                 synced: json.syncedLyrics,
@@ -68,5 +71,20 @@ export class LrcLib {
             observe({ 'lrclibError': err });
             return null;
         }
+    }
+
+    async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LyricsResponse | null> {
+        // 1. Check Negative Cache
+        const negativeStatus = await this.cacheService.getNegative('lrclib', videoId);
+        if (negativeStatus.hit) {
+            if (negativeStatus.stale) {
+                // SWR: Return null, but fetch in background
+                addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
+            }
+            return null;
+        }
+
+        // 2. Fetch Synchronously
+        return this.fetchAndSave(videoId, artist, song, album, duration);
     }
 }

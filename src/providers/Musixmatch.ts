@@ -433,56 +433,14 @@ export class Musixmatch {
         return { richSynced: null, synced: lrcStr, unsynced: null, debugInfo: null, ttml: null };
     }
 
-
-    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null | void> | null, tokenPromise: Promise<void>):
-        Promise<LyricsResponse | null> {
-        
-        // 1. Check Negative Cache
-        const isNegative = await this.cacheService.getNegative('youtube_music', videoId);
-        if (isNegative) {
-            observe({ 'musixmatchNegativeCacheHit': true });
-            return null;
-        }
-
-        // 2. Check Positive Cache
-        let cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
-        let forceRefetch = false;
-
-        if (cachedData) {
-            // Check stale
-            const now = Math.floor(Date.now() / 1000);
-            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
-            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
-
-            if (now - cachedData.lastUpdatedAt > threshold) {
-                if (Math.random() < chance) {
-                    forceRefetch = true;
-                    observe({ 'musixmatchCacheRefetch': true });
-                }
-            }
-
-            if (!forceRefetch) {
-                let richSynced: string | null = null;
-                let normalSynced: string | null = null;
-
-                for (const lyric of cachedData.lyrics) {
-                    if (lyric.format == "rich_sync") {
-                        richSynced = lyric.content;
-                    } else if (lyric.format == "normal_sync") {
-                        normalSynced = lyric.content;
-                    }
-                }
-
-                return {
-                    richSynced: richSynced, synced: normalSynced, unsynced: null, debugInfo: {
-                        lyricMatchingStats: null,
-                        comment: 'musixmatch cache'
-                    }, ttml: null
-                };
-            }
-        }
-
-        // 3. Fetch from API
+    private async fetchAndSave(
+        videoId: string, 
+        artist: string, 
+        track: string, 
+        album: string | null, 
+        lrcLyrics: Promise<LyricsResponse | null | void> | null, 
+        tokenPromise: Promise<void>
+    ): Promise<LyricsResponse | null> {
         await tokenPromise;
         observe({ 'musixMatchHasValidToken': token !== null });
         if (token === null) {
@@ -513,7 +471,7 @@ export class Musixmatch {
                 header: data.message.header
                 }
             });
-            // Negative Cache Save (if 404 or similar, but here status 404 from matcher means not found)
+            // Negative Cache Save
             if (data.message.header.status_code === 404) {
                 addAwait(this.cacheService.saveNegative('youtube_music', videoId));
             }
@@ -537,6 +495,10 @@ export class Musixmatch {
         }
 
         if (result) {
+            // Clear negative cache if it existed
+            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                .bind('youtube_music', videoId).run());
+
             if (result.richSynced) {
                 addAwait(
                     this.cacheService.saveMusixmatchLyrics({
@@ -560,16 +522,72 @@ export class Musixmatch {
                 );
             }
         } else {
-            // Matcher found track, but no lyrics found in it?
-            // Maybe not, maybe just no lyrics YET.
-            // But we can negative cache it for a while.
-            // Let's assume yes.
              addAwait(this.cacheService.saveNegative('youtube_music', videoId));
         }
 
         return result;
     }
+
+
+    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null | void> | null, tokenPromise: Promise<void>):
+        Promise<LyricsResponse | null> {
+        
+        // 1. Check Negative Cache
+        const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
+        if (negativeStatus.hit) {
+            if (negativeStatus.stale) {
+                // SWR: Fetch in background
+                addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
+            }
+            return null;
+        }
+
+        // 2. Check Positive Cache
+        let cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
+        let shouldRefetch = false;
+
+        if (cachedData) {
+            // Check stale
+            const now = Math.floor(Date.now() / 1000);
+            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
+            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
+
+            if (now - cachedData.lastUpdatedAt > threshold) {
+                if (Math.random() < chance) {
+                    shouldRefetch = true;
+                    observe({ 'musixmatchCacheRefetch': true });
+                }
+            }
+
+            if (shouldRefetch) {
+                 // SWR: Use cached data, but fetch in background
+                 addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
+            }
+
+            let richSynced: string | null = null;
+            let normalSynced: string | null = null;
+
+            for (const lyric of cachedData.lyrics) {
+                if (lyric.format == "rich_sync") {
+                    richSynced = lyric.content;
+                } else if (lyric.format == "normal_sync") {
+                    normalSynced = lyric.content;
+                }
+            }
+
+            return {
+                richSynced: richSynced, synced: normalSynced, unsynced: null, debugInfo: {
+                    lyricMatchingStats: null,
+                    comment: 'musixmatch cache'
+                }, ttml: null
+            };
+        }
+
+        // 3. Fetch from API
+        return this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise);
+    }
 }
+
 
 function meanAndVariance(arr: number[]) {
     const mean = arr.reduce((acc, val) => acc + val, 0) / arr.length;

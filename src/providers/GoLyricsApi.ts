@@ -15,7 +15,7 @@ export interface GoLyricsApiParameters {
 }
 
 const DEFAULT_REFETCH_THRESHOLD = 7 * 86400; // 1 week
-const DEFAULT_REFETCH_CHANCE = 0.2;
+const DEFAULT_REFETCH_CHANCE = 0.02;
 
 export class GoLyricsApi {
     private readonly ROOT_URL = Constants.LYRICS_API_URL;
@@ -71,46 +71,7 @@ export class GoLyricsApi {
         return new Response(teeBody[0], newResponse);
     }
 
-    async getLrc(videoId: string, providerParameters: GoLyricsApiParameters): Promise<LyricsResponse | null> {
-        
-        if (await this.cacheService.getNegative('golyrics', videoId)) {
-            return null;
-        }
-
-        let cachedData = await this.cacheService.getGoLyrics("youtube_music", videoId);
-        let forceRefetch = false;
-
-        if (cachedData) {
-            const now = Math.floor(Date.now() / 1000);
-            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
-            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
-
-            if (now - cachedData.lastUpdatedAt > threshold) {
-                if (Math.random() < chance) {
-                    forceRefetch = true;
-                    observe({ 'goLyricsCacheRefetch': true });
-                }
-            }
-            
-            if (!forceRefetch) {
-                let ttml: string | null = null;
-                for (const lyric of cachedData.lyrics) {
-                    if (lyric.format == "ttml") {
-                        ttml = lyric.content;
-                    }
-                }
-                return {
-                    ttml: ttml,
-                    richSynced: null,
-                    synced: null,
-                    unsynced: null,
-                    debugInfo: {
-                        comment: 'goLyricsApi cache'
-                    }
-                };
-            }
-        }
-
+    private async fetchAndSave(videoId: string, providerParameters: GoLyricsApiParameters): Promise<LyricsResponse | null> {
         const response = await this._get(providerParameters);
 
         if (response.status !== 200) {
@@ -137,6 +98,22 @@ export class GoLyricsApi {
                     lyric_content: ttml,
                 })
             );
+
+            // Also clear negative cache if it existed?
+            // saveGoLyrics implies success, so negative cache might need cleanup if we are recovering from negative SWR?
+            // saveNegative uses UPSERT. We might want to DELETE negative cache if we found lyrics.
+            // But `CacheService.saveGoLyrics` doesn't do that automatically.
+            // However, `getLrc` checks negative cache first. If we found lyrics now, we should probably ensure negative cache is gone.
+            // Let's rely on standard flow. Ideally `saveGoLyrics` (or higher level logic) handles this.
+            // For now, let's just save. If future requests hit `getNegative`, it returns true.
+            // Wait, if we save Positive cache, `getGoLyrics` will return data.
+            // But `getLrc` checks `getNegative` FIRST.
+            // So if we don't delete Negative cache, we will keep hitting Negative cache (even if stale SWR runs and saves Positive).
+            // So YES, we MUST delete Negative cache if we successfully save Positive lyrics.
+
+            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                .bind('golyrics', videoId).run());
+
         } else {
              addAwait(this.cacheService.saveNegative('golyrics', videoId));
         }
@@ -148,5 +125,60 @@ export class GoLyricsApi {
             unsynced: null,
             debugInfo: null
         };
+    }
+
+    async getLrc(videoId: string, providerParameters: GoLyricsApiParameters): Promise<LyricsResponse | null> {
+
+        // 1. Check Negative Cache
+        const negativeStatus = await this.cacheService.getNegative('golyrics', videoId);
+        if (negativeStatus.hit) {
+            if (negativeStatus.stale) {
+                // SWR: Return null, but fetch in background
+                addAwait(this.fetchAndSave(videoId, providerParameters));
+            }
+            return null;
+        }
+
+        // 2. Check Positive Cache
+        let cachedData = await this.cacheService.getGoLyrics("youtube_music", videoId);
+        let shouldRefetch = false;
+
+        if (cachedData) {
+            const now = Math.floor(Date.now() / 1000);
+            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
+            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
+
+            if (now - cachedData.lastUpdatedAt > threshold) {
+                if (Math.random() < chance) {
+                    shouldRefetch = true;
+                    observe({ 'goLyricsCacheRefetch': true });
+                }
+            }
+
+            if (shouldRefetch) {
+                 // SWR: Use cached data, but fetch in background
+                 addAwait(this.fetchAndSave(videoId, providerParameters));
+            }
+
+            // Return cached data
+            let ttml: string | null = null;
+            for (const lyric of cachedData.lyrics) {
+                if (lyric.format == "ttml") {
+                    ttml = lyric.content;
+                }
+            }
+            return {
+                ttml: ttml,
+                richSynced: null,
+                synced: null,
+                unsynced: null,
+                debugInfo: {
+                    comment: 'goLyricsApi cache'
+                }
+            };
+        }
+
+        // 3. No Cache, Fetch Synchronously
+        return this.fetchAndSave(videoId, providerParameters);
     }
 }

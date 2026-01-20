@@ -23,6 +23,10 @@ export interface NegativeCacheData {
     source_track_id: string;
 }
 
+const DEFAULT_NEGATIVE_CACHE_TTL = 7 * 86400; // 7 days
+const DEFAULT_NEGATIVE_CACHE_TTL_LRCLIB = 86400; // 1 day
+const DEFAULT_NEGATIVE_CACHE_TTL_MUSIXMATCH = 3 * 86400; // 3 days
+
 export class CacheService {
     constructor(private env: Env) {}
 
@@ -169,32 +173,42 @@ export class CacheService {
         }
     }
 
-    async getNegative(source_platform: SourcePlatform, source_track_id: string): Promise<boolean> {
-        const stmt = this.env.DB.prepare("SELECT 1 FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2");
-        const result = await stmt.bind(source_platform, source_track_id).first();
-        return !!result;
+    async getNegative(source_platform: SourcePlatform, source_track_id: string): Promise<{ hit: boolean, stale: boolean }> {
+        const stmt = this.env.DB.prepare("SELECT created_at FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2");
+        const result = await stmt.bind(source_platform, source_track_id).first<{ created_at: number }>();
+        
+        if (!result) return { hit: false, stale: false };
+
+        const now = Math.floor(Date.now() / 1000);
+        let ttl = DEFAULT_NEGATIVE_CACHE_TTL;
+
+        if (source_platform === 'lrclib') {
+            ttl = this.env.NEGATIVE_CACHE_TTL_LRCLIB ? parseInt(this.env.NEGATIVE_CACHE_TTL_LRCLIB) : DEFAULT_NEGATIVE_CACHE_TTL_LRCLIB;
+        } else if (source_platform === 'youtube_music') { // Mapped to Musixmatch in provider logic
+            ttl = this.env.NEGATIVE_CACHE_TTL_MUSIXMATCH ? parseInt(this.env.NEGATIVE_CACHE_TTL_MUSIXMATCH) : DEFAULT_NEGATIVE_CACHE_TTL_MUSIXMATCH;
+        }
+
+        if (now - result.created_at > ttl) {
+            return { hit: true, stale: true };
+        }
+
+        return { hit: true, stale: false };
     }
 
     async saveNegative(source_platform: SourcePlatform, source_track_id: string): Promise<void> {
         const now = Math.floor(Date.now() / 1000);
-        await this.env.DB.prepare("INSERT INTO negative_mappings (source_platform, source_track_id, created_at) VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING")
-            .bind(source_platform, source_track_id, now).run();
+        // Using UPSERT to update timestamp if it already exists (e.g. extending negative cache or re-affirming it)
+        await this.env.DB.prepare(`
+            INSERT INTO negative_mappings (source_platform, source_track_id, created_at) 
+            VALUES (?1, ?2, ?3) 
+            ON CONFLICT(source_platform, source_track_id) DO UPDATE SET created_at = ?3
+        `).bind(source_platform, source_track_id, now).run();
     }
     
     async deleteCache(videoId: string): Promise<void> {
-         // Delete from tracks/mappings (Musixmatch)
-         // We need to find track_id first to delete lyrics?
-         // CASCADE delete on track_id should handle lyrics if we delete track?
-         // But multiple mappings might point to same track.
-         // If we just want to clear cache for THIS video:
-         
          // 1. Delete mapping
          const mapping = await this.env.DB.prepare("SELECT track_id FROM track_mappings WHERE source_track_id = ?1").bind(videoId).first<{track_id: number}>();
          if (mapping) {
-             // Should we delete the track too? Only if no other mappings point to it.
-             // For simplicity, just delete the mapping. The track might be orphaned but that's okay for cache clearing.
-             // Or we can delete the track if we are sure.
-             // Let's delete the mapping.
              await this.env.DB.prepare("DELETE FROM track_mappings WHERE source_track_id = ?1").bind(videoId).run();
          }
          
