@@ -15,7 +15,7 @@ export interface GoLyricsApiParameters {
 }
 
 const DEFAULT_REFETCH_THRESHOLD = 7 * 86400; // 1 week
-const DEFAULT_REFETCH_CHANCE = 0.02;
+const DEFAULT_REFETCH_CHANCE = 0.1;
 
 export class GoLyricsApi {
     private readonly ROOT_URL = Constants.LYRICS_API_URL;

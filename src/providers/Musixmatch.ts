@@ -136,7 +136,7 @@ let tokenRetryCount = 0;
 let tokenRetryMax = 3;
 
 const DEFAULT_REFETCH_THRESHOLD = 7 * 86400; // 1 week
-const DEFAULT_REFETCH_CHANCE = 0.2; // 20% chance if old
+const DEFAULT_REFETCH_CHANCE = 0.02; // 20% chance if old
 
 export class Musixmatch {
     private cookies: { key: string, cookie: string }[] = [];
@@ -434,11 +434,11 @@ export class Musixmatch {
     }
 
     private async fetchAndSave(
-        videoId: string, 
-        artist: string, 
-        track: string, 
-        album: string | null, 
-        lrcLyrics: Promise<LyricsResponse | null | void> | null, 
+        videoId: string,
+        artist: string,
+        track: string,
+        album: string | null,
+        lrcLyrics: Promise<LyricsResponse | null | void> | null,
         tokenPromise: Promise<void>
     ): Promise<LyricsResponse | null> {
         await tokenPromise;
@@ -531,7 +531,7 @@ export class Musixmatch {
 
     async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null | void> | null, tokenPromise: Promise<void>):
         Promise<LyricsResponse | null> {
-        
+
         // 1. Check Negative Cache
         const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
         if (negativeStatus.hit) {
