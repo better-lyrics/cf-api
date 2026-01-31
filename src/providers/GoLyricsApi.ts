@@ -19,7 +19,6 @@ const DEFAULT_REFETCH_CHANCE = 1;
 
 export class GoLyricsApi {
     private readonly ROOT_URL = Constants.LYRICS_API_URL;
-    private cache = caches.default;
     private cacheService: CacheService;
     private env: Env;
 
@@ -37,14 +36,6 @@ export class GoLyricsApi {
             url.searchParams.append("al", providerParameters.album);
         }
 
-        let cacheUrl = url.toString();
-        let cachedResponse = await this.cache.match(cacheUrl);
-        if (cachedResponse) {
-            observe({ 'goLyricsApiCache': { found: true, cacheUrl: cacheUrl } });
-            return cachedResponse;
-        } else {
-            observe({ 'goLyricsApiCache': { found: false, cacheUrl: cacheUrl } });
-        }
 
         const response = await fetch(url.toString(), {
             headers: {
@@ -63,10 +54,9 @@ export class GoLyricsApi {
         let keys = [...newResponse.headers.keys()];
         keys.forEach((key) => newResponse.headers.delete(key));
 
-        if (newResponse.status === 200) {
-            newResponse.headers.set('Cache-control', 'public; max-age=604800');
-            addAwait(this.cache.put(cacheUrl, newResponse));
-        }
+        observe({'goLyricsApi': {responseStatus: response.status }});
+
+
 
         return new Response(teeBody[0], newResponse);
     }
