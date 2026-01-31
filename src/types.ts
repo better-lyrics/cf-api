@@ -19,7 +19,8 @@ export const LyricsResponseSchema = z.object({
 
 export type LyricsResponse = z.infer<typeof LyricsResponseSchema>;
 
-export interface Env extends Cloudflare.Env {
+export interface Env extends Omit<Cloudflare.Env, "DB"> {
+    DB: D1Database | D1DatabaseSession;
     REFETCH_THRESHOLD?: string; // seconds
     REFETCH_CHANCE?: string; // 0.0 to 1.0
     NEGATIVE_CACHE_TTL_LRCLIB?: string; // seconds

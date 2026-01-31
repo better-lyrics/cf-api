@@ -61,7 +61,11 @@ export default {
     fetch: async (request: Request, env: Env, ctx: ExecutionContext) => {
         return runWithObservability(async () => {
             try {
-                return await app.fetch(request, env, ctx);
+                // Use D1 sessions to enable read replicas and sequential consistency
+                const sessionDB = 'withSession' in env.DB ? env.DB.withSession() : env.DB;
+                const sessionEnv: Env = { ...env, DB: sessionDB };
+
+                return await app.fetch(request, sessionEnv, ctx);
             } finally {
                 ctx.waitUntil(flushObservability());
             }
