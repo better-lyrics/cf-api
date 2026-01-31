@@ -135,8 +135,8 @@ let token: string | null = null; // null means we haven't gotten a token yet
 let tokenRetryCount = 0;
 let tokenRetryMax = 3;
 
-const DEFAULT_REFETCH_THRESHOLD = 7 * 86400; // 1 week
-const DEFAULT_REFETCH_CHANCE = 0.02; // 20% chance if old
+const DEFAULT_REFETCH_THRESHOLD = 14 * 86400; // 1 week
+const DEFAULT_REFETCH_CHANCE = 0.02; // 2% chance if old
 
 export class Musixmatch {
     private cookies: { key: string, cookie: string }[] = [];

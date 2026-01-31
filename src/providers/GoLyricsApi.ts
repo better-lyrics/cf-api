@@ -14,8 +14,8 @@ export interface GoLyricsApiParameters {
     duration: string;
 }
 
-const DEFAULT_REFETCH_THRESHOLD = 7 * 86400; // 1 week
-const DEFAULT_REFETCH_CHANCE = 0.1;
+const DEFAULT_REFETCH_THRESHOLD = 0 * 86400;
+const DEFAULT_REFETCH_CHANCE = 1;
 
 export class GoLyricsApi {
     private readonly ROOT_URL = Constants.LYRICS_API_URL;
@@ -98,18 +98,6 @@ export class GoLyricsApi {
                     lyric_content: ttml,
                 })
             );
-
-            // Also clear negative cache if it existed?
-            // saveGoLyrics implies success, so negative cache might need cleanup if we are recovering from negative SWR?
-            // saveNegative uses UPSERT. We might want to DELETE negative cache if we found lyrics.
-            // But `CacheService.saveGoLyrics` doesn't do that automatically.
-            // However, `getLrc` checks negative cache first. If we found lyrics now, we should probably ensure negative cache is gone.
-            // Let's rely on standard flow. Ideally `saveGoLyrics` (or higher level logic) handles this.
-            // For now, let's just save. If future requests hit `getNegative`, it returns true.
-            // Wait, if we save Positive cache, `getGoLyrics` will return data.
-            // But `getLrc` checks `getNegative` FIRST.
-            // So if we don't delete Negative cache, we will keep hitting Negative cache (even if stale SWR runs and saves Positive).
-            // So YES, we MUST delete Negative cache if we successfully save Positive lyrics.
 
             addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
                 .bind('golyrics', videoId).run());

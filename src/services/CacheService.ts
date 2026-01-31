@@ -23,9 +23,9 @@ export interface NegativeCacheData {
     source_track_id: string;
 }
 
-const DEFAULT_NEGATIVE_CACHE_TTL = 7 * 86400; // 7 days
-const DEFAULT_NEGATIVE_CACHE_TTL_LRCLIB = 86400; // 1 day
-const DEFAULT_NEGATIVE_CACHE_TTL_MUSIXMATCH = 3 * 86400; // 3 days
+const DEFAULT_NEGATIVE_CACHE_TTL = 0;
+const DEFAULT_NEGATIVE_CACHE_TTL_LRCLIB = 0;
+const DEFAULT_NEGATIVE_CACHE_TTL_MUSIXMATCH = 5 * 86400; // 5 days
 
 export class CacheService {
     constructor(private env: Env) {}
@@ -81,7 +81,7 @@ export class CacheService {
             });
 
         const lyrics = (await Promise.all(lyricsPromises)).filter((l: any): l is Lyric => l !== null);
-        
+
         return { lyrics, lastUpdatedAt };
     }
 
@@ -90,33 +90,33 @@ export class CacheService {
         try {
             const compressedContent = pako.deflate(data.lyric_content);
             const r2ObjectKey = `${data.musixmatch_track_id}/${data.lyric_format}.gz`;
-            
+
             await this.env.LYRICS_BUCKET.put(r2ObjectKey, compressedContent);
 
             const now = Math.floor(Date.now() / 1000);
 
             // Insert/Update track
             await this.env.DB.prepare(`
-                INSERT INTO tracks (musixmatch_track_id, last_accessed_at, last_updated_at) 
-                VALUES (?1, ?2, ?2) 
+                INSERT INTO tracks (musixmatch_track_id, last_accessed_at, last_updated_at)
+                VALUES (?1, ?2, ?2)
                 ON CONFLICT(musixmatch_track_id) DO UPDATE SET last_accessed_at = ?2, last_updated_at = ?2
             `).bind(data.musixmatch_track_id, now).run();
 
             const track = await this.env.DB.prepare("SELECT id FROM tracks WHERE musixmatch_track_id = ?1")
                 .bind(data.musixmatch_track_id).first<{id: number}>();
-            
+
             if (!track) throw new Error("Track creation failed");
 
             const finalStmts = [
                 this.env.DB.prepare(`
-                    INSERT INTO lyrics (track_id, format, r2_object_key) 
-                    VALUES (?1, ?2, ?3) 
+                    INSERT INTO lyrics (track_id, format, r2_object_key)
+                    VALUES (?1, ?2, ?3)
                     ON CONFLICT(r2_object_key) DO NOTHING
                 `).bind(track.id, data.lyric_format, r2ObjectKey), // Note: r2_object_key is UNIQUE in schema? Yes.
-                
+
                 this.env.DB.prepare(`
-                    INSERT INTO track_mappings (source_platform, source_track_id, track_id) 
-                    VALUES (?1, ?2, ?3) 
+                    INSERT INTO track_mappings (source_platform, source_track_id, track_id)
+                    VALUES (?1, ?2, ?3)
                     ON CONFLICT DO NOTHING
                 `).bind(data.source_platform, data.source_track_id, track.id)
             ];
@@ -144,15 +144,15 @@ export class CacheService {
                 .bind(now, source_track_id, source_platform).run()
             );
         }
-        
+
         const lastUpdatedAt = result.last_updated_at || result.last_accessed_at;
 
         const object = await this.env.LYRICS_BUCKET.get(result.r2_key);
         if (!object) return null;
         const compressed = await object.arrayBuffer();
         const content = pako.inflate(compressed, { to: 'string' });
-        
-        return { lyrics: [{ format: 'ttml', content }], lastUpdatedAt }; 
+
+        return { lyrics: [{ format: 'ttml', content }], lastUpdatedAt };
     }
 
     async saveGoLyrics(data: SaveLyricsData): Promise<boolean> {
@@ -163,8 +163,8 @@ export class CacheService {
 
             const now = Math.floor(Date.now() / 1000);
             await this.env.DB.prepare(`
-                INSERT INTO go_lyrics_cache (video_id, source_platform, r2_key, last_accessed_at, last_updated_at) 
-                VALUES (?1, ?2, ?3, ?4, ?4) 
+                INSERT INTO go_lyrics_cache (video_id, source_platform, r2_key, last_accessed_at, last_updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?4)
                 ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, last_accessed_at = ?4, last_updated_at = ?4
             `).bind(data.source_track_id, data.source_platform, r2Key, now).run();
             return true;
@@ -176,7 +176,7 @@ export class CacheService {
     async getNegative(source_platform: SourcePlatform, source_track_id: string): Promise<{ hit: boolean, stale: boolean }> {
         const stmt = this.env.DB.prepare("SELECT created_at FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2");
         const result = await stmt.bind(source_platform, source_track_id).first<{ created_at: number }>();
-        
+
         if (!result) return { hit: false, stale: false };
 
         const now = Math.floor(Date.now() / 1000);
@@ -199,25 +199,25 @@ export class CacheService {
         const now = Math.floor(Date.now() / 1000);
         // Using UPSERT to update timestamp if it already exists (e.g. extending negative cache or re-affirming it)
         await this.env.DB.prepare(`
-            INSERT INTO negative_mappings (source_platform, source_track_id, created_at) 
-            VALUES (?1, ?2, ?3) 
+            INSERT INTO negative_mappings (source_platform, source_track_id, created_at)
+            VALUES (?1, ?2, ?3)
             ON CONFLICT(source_platform, source_track_id) DO UPDATE SET created_at = ?3
         `).bind(source_platform, source_track_id, now).run();
     }
-    
+
     async deleteCache(videoId: string): Promise<void> {
          // 1. Delete mapping
          const mapping = await this.env.DB.prepare("SELECT track_id FROM track_mappings WHERE source_track_id = ?1").bind(videoId).first<{track_id: number}>();
          if (mapping) {
              await this.env.DB.prepare("DELETE FROM track_mappings WHERE source_track_id = ?1").bind(videoId).run();
          }
-         
+
          // 2. Delete GoLyrics cache
          await this.env.DB.prepare("DELETE FROM go_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
-         
+
          // 3. Delete YouTube metadata cache
          await this.env.DB.prepare("DELETE FROM youtube_cache WHERE video_id = ?1").bind(videoId).run();
-         
+
          // 4. Delete negative cache
          await this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_track_id = ?1").bind(videoId).run();
     }
