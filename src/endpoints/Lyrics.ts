@@ -64,10 +64,10 @@ export class Lyrics extends OpenAPIRoute {
 
         const service = new LyricsService(env);
         const url = new URL(request.url);
-        
+
         try {
             const result = await service.getLyrics(url.searchParams);
-            
+
             let corsHeaders =  {
                 "Content-Type": "application/json",
                 'Access-Control-Allow-Origin': 'https://music.youtube.com',
@@ -80,7 +80,7 @@ export class Lyrics extends OpenAPIRoute {
             const response = c.json(result, 200, corsHeaders);
 
             if (result.musixmatchSyncedLyrics || result.lrclibSyncedLyrics || result.goLyricsApiTtml) {
-                response.headers.set('Cache-control', 'public; max-age=259200');
+                response.headers.set('Cache-control', 'public; max-age=86400');
             } else {
                 response.headers.set("Cache-control", "public; max-age=600");
             }
