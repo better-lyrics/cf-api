@@ -173,6 +173,56 @@ export class CacheService {
         }
     }
 
+    async getLrcLib(source_platform: SourcePlatform, source_track_id: string): Promise<{ synced: string | null, unsynced: string | null, lastUpdatedAt: number } | null> {
+        const stmt = this.env.DB.prepare(`
+            SELECT r2_key, last_accessed_at, last_updated_at FROM lrclib_cache WHERE video_id = ?1 AND source_platform = ?2
+        `);
+        const result = await stmt.bind(source_track_id, source_platform).first<{ r2_key: string, last_accessed_at: number, last_updated_at: number }>();
+
+        if (!result) return null;
+
+        const now = Math.floor(Date.now() / 1000);
+        if (now - result.last_accessed_at > 86400) {
+            addAwait(
+                this.env.DB.prepare("UPDATE lrclib_cache SET last_accessed_at = ?1 WHERE video_id = ?2 AND source_platform = ?3")
+                    .bind(now, source_track_id, source_platform).run()
+            );
+        }
+
+        const lastUpdatedAt = result.last_updated_at || result.last_accessed_at;
+
+        const object = await this.env.LYRICS_BUCKET.get(result.r2_key);
+        if (!object) return null;
+        const compressed = await object.arrayBuffer();
+        const content = pako.inflate(compressed, { to: 'string' });
+
+        try {
+            return { ...JSON.parse(content), lastUpdatedAt };
+        } catch (e) {
+            console.error("Failed to parse LrcLib cache", e);
+            return null;
+        }
+    }
+
+    async saveLrcLib(data: SaveLyricsData): Promise<boolean> {
+        try {
+            const compressed = pako.deflate(data.lyric_content);
+            const r2Key = `${data.source_track_id}/lrclib.gz`;
+            await this.env.LYRICS_BUCKET.put(r2Key, compressed);
+
+            const now = Math.floor(Date.now() / 1000);
+            await this.env.DB.prepare(`
+                INSERT INTO lrclib_cache (video_id, source_platform, r2_key, last_accessed_at, last_updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?4)
+                ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, last_accessed_at = ?4, last_updated_at = ?4
+            `).bind(data.source_track_id, data.source_platform, r2Key, now).run();
+            return true;
+        } catch (e) {
+            console.error("Save LrcLib failed", e);
+            return false;
+        }
+    }
+
     async getNegative(source_platform: SourcePlatform, source_track_id: string): Promise<{ hit: boolean, stale: boolean }> {
         const stmt = this.env.DB.prepare("SELECT created_at FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2");
         const result = await stmt.bind(source_platform, source_track_id).first<{ created_at: number }>();
@@ -218,7 +268,10 @@ export class CacheService {
          // 3. Delete YouTube metadata cache
          await this.env.DB.prepare("DELETE FROM youtube_cache WHERE video_id = ?1").bind(videoId).run();
 
-         // 4. Delete negative cache
+         // 4. Delete LrcLib cache
+         await this.env.DB.prepare("DELETE FROM lrclib_cache WHERE video_id = ?1").bind(videoId).run();
+
+         // 5. Delete negative cache
          await this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_track_id = ?1").bind(videoId).run();
     }
 }

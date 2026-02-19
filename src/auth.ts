@@ -103,13 +103,13 @@ export async function verifyJwt(token: string, secretKey: string, requestIp: str
 
         // 1. Check if the token has expired
         if (payload.exp && Date.now() / 1000 > payload.exp) {
-            observe({jwtLog: 'JWT has expired' });
+            observe({ jwtLog: 'JWT has expired' });
             return false;
         }
 
         // 2. Check if the IP address matches the one in the token
         if (payload.ip !== requestIp) {
-            observe({jwtLog: `JWT IP mismatch. Token IP: ${payload.ip}, Request IP: ${requestIp}` });
+            observe({ jwtLog: `JWT IP mismatch. Token IP: ${payload.ip}, Request IP: ${requestIp}` });
             return false;
         }
 

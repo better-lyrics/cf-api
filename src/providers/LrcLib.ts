@@ -60,6 +60,15 @@ export class LrcLib {
             addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
                 .bind('lrclib', videoId).run());
 
+            if (json.syncedLyrics || json.plainLyrics) {
+                addAwait(this.cacheService.saveLrcLib({
+                    source_platform: 'youtube_music',
+                    source_track_id: videoId,
+                    lyric_content: JSON.stringify({ synced: json.syncedLyrics, unsynced: json.plainLyrics }),
+                    lyric_format: 'normal_sync'
+                }));
+            }
+
             return {
                 richSynced: null,
                 synced: json.syncedLyrics,
@@ -84,7 +93,36 @@ export class LrcLib {
             return null;
         }
 
-        // 2. Fetch Synchronously
+        // 2. Check Positive Cache
+        let cachedData = await this.cacheService.getLrcLib("youtube_music", videoId);
+        let shouldRefetch = false;
+
+        if (cachedData) {
+            const now = Math.floor(Date.now() / 1000);
+            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : 0;
+            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : 1;
+
+            if (now - cachedData.lastUpdatedAt > threshold) {
+                if (Math.random() < chance) {
+                    shouldRefetch = true;
+                    observe({ 'lrclibCacheRefetch': true });
+                }
+            }
+
+            if (shouldRefetch) {
+                addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
+            }
+
+            return {
+                richSynced: null,
+                synced: cachedData.synced,
+                unsynced: cachedData.unsynced,
+                debugInfo: { comment: 'lrclib cache' },
+                ttml: null
+            };
+        }
+
+        // 3. Fetch Synchronously
         return this.fetchAndSave(videoId, artist, song, album, duration);
     }
 }
