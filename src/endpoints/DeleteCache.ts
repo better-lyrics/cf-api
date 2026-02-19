@@ -40,10 +40,10 @@ export class DeleteCache extends OpenAPIRoute {
         if (!(env.BYPASS_AUTH && env.BYPASS_AUTH === "true")) {
             const adminKeys = env.ADMIN_KEYS ? env.ADMIN_KEYS.split(',') : [];
             const apiKey = request.headers.get('x-admin-key');
-            const turnstileToken = request.headers.get("turnstile-token");
+            const turnstileToken = null; // request.headers.get("turnstile-token");
 
             if ((!apiKey || !adminKeys.includes(apiKey)) &&
-                (!turnstileToken)) { // || !verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY)
+                (!turnstileToken || !verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY))) {
                 return c.json({ error: 'Unauthorized' }, 403);
             }
         }
