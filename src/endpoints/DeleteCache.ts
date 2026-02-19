@@ -2,6 +2,8 @@ import { OpenAPIRoute, OpenAPIRouteSchema } from "chanfana";
 import { z } from "zod";
 import { CacheService } from "../services/CacheService";
 import { AppContext } from "../types";
+import { VerifyTurnstile } from "./VerifyTurnstile";
+import { verifyTurnstileToken } from "../auth";
 
 export class DeleteCache extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
@@ -12,8 +14,9 @@ export class DeleteCache extends OpenAPIRoute {
                 videoId: z.string()
             }),
             headers: z.object({
-                "x-admin-key": z.string().optional()
-            })
+                "x-admin-key": z.string().optional(),
+                "turnstile-token": z.string().optional(),
+            }),
         },
         responses: {
             "200": {
@@ -35,12 +38,14 @@ export class DeleteCache extends OpenAPIRoute {
         const request = c.req.raw;
 
         if (!(env.BYPASS_AUTH && env.BYPASS_AUTH === "true")) {
-             const adminKeys = env.ADMIN_KEYS ? env.ADMIN_KEYS.split(',') : [];
-             const apiKey = request.headers.get('x-admin-key');
-             
-             if (!apiKey || !adminKeys.includes(apiKey)) {
-                 return c.json({ error: 'Unauthorized' }, 403);
-             }
+            const adminKeys = env.ADMIN_KEYS ? env.ADMIN_KEYS.split(',') : [];
+            const apiKey = request.headers.get('x-admin-key');
+            const turnstileToken = request.headers.get("turnstile-token");
+
+            if ((!apiKey || !adminKeys.includes(apiKey)) &&
+                (!turnstileToken)) { // || !verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY)
+                return c.json({ error: 'Unauthorized' }, 403);
+            }
         }
 
         const data = await this.getValidatedData<any>();

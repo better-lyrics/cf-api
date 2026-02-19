@@ -43,7 +43,6 @@ export class VerifyTurnstile extends OpenAPIRoute {
         }
 
         const isValid = await verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY);
-
         const corsHeaders = {
             'Access-Control-Allow-Origin': 'https://music.youtube.com',
             'Access-Control-Allow-Credentials': 'true',

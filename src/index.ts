@@ -10,12 +10,12 @@ import { Env } from "./types";
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', cors({
-  origin: 'https://music.youtube.com',
-  allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Authorization', 'Content-Type'],
-  exposeHeaders: ['Content-Length'],
-  maxAge: 86400,
-  credentials: true,
+    origin: 'https://music.youtube.com',
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    allowHeaders: ['Authorization', 'Content-Type'],
+    exposeHeaders: ['Content-Length'],
+    maxAge: 86400,
+    credentials: true,
 }));
 
 app.onError((err, c) => {
