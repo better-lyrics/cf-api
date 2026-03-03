@@ -55,7 +55,7 @@ export class LrcLib {
             }
 
             const json = await res.json() as LrcLibResponse;
-            
+
             // If we found lyrics, ensure negative cache is cleared
             addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
                 .bind('lrclib', videoId).run());
@@ -99,8 +99,8 @@ export class LrcLib {
 
         if (cachedData) {
             const now = Math.floor(Date.now() / 1000);
-            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : 0;
-            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : 1;
+            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : 1 * 86400;
+            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : 0.2;
 
             if (now - cachedData.lastUpdatedAt > threshold) {
                 if (Math.random() < chance) {
