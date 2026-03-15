@@ -47,11 +47,3 @@ export function parseLrc(lrcText: string) {
 
     return result;
 }
-
-export interface LyricsResponse {
-    ttml: string | null;
-    richSynced: string | null;
-    synced: string | null | undefined;
-    unsynced: string | null;
-    debugInfo: any;
-}

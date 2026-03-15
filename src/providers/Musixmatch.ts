@@ -1,8 +1,8 @@
 // Types for our responses and data
 import { addAwait, observe } from '../observability';
 import { diffArrays } from 'diff';
-import { LyricsResponse, parseLrc } from '../LyricUtils';
-import { CacheService, Lyric } from '../services/CacheService';
+import { parseLrc } from '../LyricUtils';
+import { CacheService } from '../services/CacheService';
 import { Env } from '../types';
 
 interface MusixmatchResponse {
@@ -128,6 +128,11 @@ export interface MatchingTimedWord {
      */
     word: string;
     wordTime: number;
+}
+
+export interface MusixmatchLyrics {
+    richSynced: string | null;
+    synced: string | null;
 }
 
 // These fields can persist through multiple requests to the API
@@ -266,16 +271,16 @@ export class Musixmatch {
         return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}.${hundredths.toString().padStart(2, '0')}`;
     }
 
-    private async getLrcWordByWord(trackId: string | number, lrcLyrics: Promise<LyricsResponse | null | void> | null):
-        Promise<LyricsResponse | null> {
+    private async getLrcWordByWord(trackId: string | number, lrcLyrics: Promise<any | null | void> | null):
+        Promise<MusixmatchLyrics | null> {
 
 
-        let musixmatchBasicLyrics: Promise<LyricsResponse | null> = this.getLrcById(trackId);
-        let basicLrcPromise: Promise<LyricsResponse | null | void>;
+        let musixmatchBasicLyricsPromise = this.getLrcById(trackId);
+        let basicLrcPromise: Promise<any | null | void>;
         if (lrcLyrics !== null) {
             basicLrcPromise = lrcLyrics;
         } else {
-            basicLrcPromise = musixmatchBasicLyrics;
+            basicLrcPromise = musixmatchBasicLyricsPromise;
         }
         const response = await this._get('track.richsync.get', [['track_id', String(trackId)]]);
         const data = await response.json() as MusixmatchResponse;
@@ -313,11 +318,13 @@ export class Musixmatch {
 
 
         let basicLrc = await basicLrcPromise;
-        if (basicLrc && basicLrc.synced) {
+        const synced = typeof basicLrc === 'string' ? basicLrc : (basicLrc && 'synced' in basicLrc ? basicLrc.synced : null);
+        
+        if (synced) {
             let basicLrcOffset = [] as number[];
             let diffDebug: { op: string, text: string }[] = [];
 
-            let parsedLrc = parseLrc(basicLrc.synced);
+            let parsedLrc = parseLrc(synced);
             let parsedLrcTokenArray: MatchingTimedWord[] = [];
             parsedLrc.forEach(({startTimeMs, words}, index) => {
                 let wordsSplit = words.split(' ');
@@ -347,9 +354,7 @@ export class Musixmatch {
 
             if (parsedLrcTokenArray.length > 5000 || richSyncTokenArray.length > 5000) {
                 return {
-                    richSynced: null, synced: (await musixmatchBasicLyrics)?.synced, unsynced: null, debugInfo: {
-                        comment: 'lyrics too long to diff'
-                    }, ttml: null
+                    richSynced: null, synced: (await musixmatchBasicLyricsPromise)?.synced || null
                 };
             }
             let diff = diffArrays(parsedLrcTokenArray, richSyncTokenArray, { comparator: (left, right) => left.word.toLowerCase() === right.word.toLowerCase() });
@@ -389,30 +394,23 @@ export class Musixmatch {
             if (variance < 1.5) {
                 lrcStr = `[offset:${addPlusSign(mean)}]\n` + lrcStr;
                 return {
-                    richSynced: lrcStr, synced: (await musixmatchBasicLyrics)?.synced, unsynced: null, debugInfo: {
-                        lyricMatchingStats: { mean, variance, samples: basicLrcOffset, diff: diffDebug }
-                    }, ttml: null
+                    richSynced: lrcStr, synced: (await musixmatchBasicLyricsPromise)?.synced || null
                 };
             } else {
                 return {
-                    richSynced: null, synced: (await musixmatchBasicLyrics)?.synced, unsynced: null, debugInfo: {
-                        lyricMatchingStats: { mean, variance, samples: basicLrcOffset, diff: diffDebug },
-                        comment: 'basic lyrics matched but variance is too high; using basic lyrics instead'
-                    }, ttml: null
+                    richSynced: null, synced: (await musixmatchBasicLyricsPromise)?.synced || null
                 };
             }
         }
 
         return {
-            richSynced: lrcStr, synced: null, unsynced: null, debugInfo: {
-                comment: 'no synced basic lyrics found'
-            }, ttml: null
+            richSynced: lrcStr, synced: null
         };
 
 
     }
 
-    private async getLrcById(trackId: string | number): Promise<LyricsResponse | null> {
+    private async getLrcById(trackId: string | number): Promise<MusixmatchLyrics | null> {
         // Get the main subtitles
         const response = await this._get('track.subtitle.get', [
             ['track_id', String(trackId)],
@@ -430,7 +428,7 @@ export class Musixmatch {
 
         let lrcStr = data.message.body.subtitle.subtitle_body;
 
-        return { richSynced: null, synced: lrcStr, unsynced: null, debugInfo: null, ttml: null };
+        return { richSynced: null, synced: lrcStr };
     }
 
     private async fetchAndSave(
@@ -438,9 +436,9 @@ export class Musixmatch {
         artist: string,
         track: string,
         album: string | null,
-        lrcLyrics: Promise<LyricsResponse | null | void> | null,
+        lrcLyrics: Promise<any | null | void> | null,
         tokenPromise: Promise<void>
-    ): Promise<LyricsResponse | null> {
+    ): Promise<MusixmatchLyrics | null> {
         await tokenPromise;
         observe({ 'musixMatchHasValidToken': token !== null });
         if (token === null) {
@@ -529,8 +527,8 @@ export class Musixmatch {
     }
 
 
-    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<LyricsResponse | null | void> | null, tokenPromise: Promise<void>):
-        Promise<LyricsResponse | null> {
+    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<any | null | void> | null, tokenPromise: Promise<void>):
+        Promise<MusixmatchLyrics | null> {
 
         // 1. Check Negative Cache
         const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
@@ -576,10 +574,7 @@ export class Musixmatch {
             }
 
             return {
-                richSynced: richSynced, synced: normalSynced, unsynced: null, debugInfo: {
-                    lyricMatchingStats: null,
-                    comment: 'musixmatch cache'
-                }, ttml: null
+                richSynced: richSynced, synced: normalSynced
             };
         }
 

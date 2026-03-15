@@ -79,7 +79,7 @@ export class Lyrics extends OpenAPIRoute {
 
             const response = c.json(result, 200, corsHeaders);
 
-            if (result.musixmatchSyncedLyrics || result.lrclibSyncedLyrics || result.goLyricsApiTtml) {
+            if (result.musixmatchSyncedLyrics || result.lrclibSyncedLyrics || result.goLyricsApiLyrics || result.qqLyricsApiLyrics || result.kugouLyricsApiLyrics) {
                 response.headers.set('Cache-control', 'public; max-age=1080');
             } else {
                 response.headers.set("Cache-control", "public; max-age=600");
