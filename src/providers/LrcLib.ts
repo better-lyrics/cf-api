@@ -1,4 +1,3 @@
-import { LyricsResponse } from '../LyricUtils';
 import { observe, addAwait } from '../observability';
 import { CacheService } from '../services/CacheService';
 import { Env } from '../types';
@@ -16,6 +15,11 @@ export interface LrcLibResponse {
     syncedLyrics: string;
 }
 
+export interface LrcLibLyrics {
+    synced: string | null;
+    unsynced: string | null;
+}
+
 export class LrcLib {
     private cacheService: CacheService;
     private env: Env;
@@ -25,7 +29,7 @@ export class LrcLib {
         this.cacheService = new CacheService(env);
     }
 
-    private async fetchAndSave(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LyricsResponse | null> {
+    private async fetchAndSave(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LrcLibLyrics | null> {
         let fetchUrl = new URL(LRCLIB_API);
         fetchUrl.searchParams.append('artist_name', artist);
         fetchUrl.searchParams.append('track_name', song);
@@ -70,11 +74,8 @@ export class LrcLib {
             }
 
             return {
-                richSynced: null,
                 synced: json.syncedLyrics,
-                unsynced: json.plainLyrics,
-                debugInfo: null,
-                ttml: null
+                unsynced: json.plainLyrics
             };
         } catch (err) {
             observe({ 'lrclibError': err });
@@ -82,7 +83,7 @@ export class LrcLib {
         }
     }
 
-    async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LyricsResponse | null> {
+    async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LrcLibLyrics | null> {
         // 1. Check Negative Cache
         const negativeStatus = await this.cacheService.getNegative('lrclib', videoId);
         if (negativeStatus.hit) {
@@ -114,11 +115,8 @@ export class LrcLib {
             }
 
             return {
-                richSynced: null,
                 synced: cachedData.synced,
-                unsynced: cachedData.unsynced,
-                debugInfo: { comment: 'lrclib cache' },
-                ttml: null
+                unsynced: cachedData.unsynced
             };
         }
 

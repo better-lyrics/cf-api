@@ -1,16 +1,17 @@
 import { Env } from '../types';
 import { MetadataService } from './MetadataService';
 import { Musixmatch } from '../providers/Musixmatch';
-import { GoLyricsApi } from '../providers/GoLyricsApi';
+import { BoiduLyricsApi } from '../providers/BoiduLyricsApi';
 import { LrcLib } from '../providers/LrcLib';
 import { observe } from '../observability';
-import { LyricsResponse } from '../LyricUtils'; // Interface
 import { isTruthy, sleep } from '../utils';
 
 export class LyricsService {
     private metadataService: MetadataService;
     private musixmatch: Musixmatch;
-    private goLyrics: GoLyricsApi;
+    private goLyrics: BoiduLyricsApi;
+    private qqLyrics: BoiduLyricsApi;
+    private kugouLyrics: BoiduLyricsApi;
     private lrcLib: LrcLib;
     private env: Env;
 
@@ -18,11 +19,13 @@ export class LyricsService {
         this.env = env;
         this.metadataService = new MetadataService(env);
         this.musixmatch = new Musixmatch(env);
-        this.goLyrics = new GoLyricsApi(env);
+        this.goLyrics = new BoiduLyricsApi(env, 'golyrics', 'https://lyrics-api.boidu.dev/getLyrics');
+        this.qqLyrics = new BoiduLyricsApi(env, 'qq', 'https://lyrics-api.boidu.dev/qq/getLyrics');
+        this.kugouLyrics = new BoiduLyricsApi(env, 'kugou', 'https://lyrics-api.boidu.dev/kugou/getLyrics');
         this.lrcLib = new LrcLib(env);
     }
 
-    async getLyrics(params: URLSearchParams): Promise<LyricsResponse | any> { // Type 'any' for the unified response object structure
+    async getLyrics(params: URLSearchParams): Promise<any> { // Type 'any' for the unified response object structure
         let artist: string | null | undefined = params.get('artist');
         let song: string | null | undefined = params.get('song');
         let album: string | null | undefined = params.get('album');
@@ -76,12 +79,13 @@ export class LyricsService {
             parsedSongAndArtist,
             videoId,
             description,
-            debugInfo: null as any,
             musixmatchWordByWordLyrics: null as any,
             musixmatchSyncedLyrics: null as any,
             lrclibSyncedLyrics: null as any,
             lrclibPlainLyrics: null as any,
-            goLyricsApiTtml: null as any
+            goLyricsApiLyrics: null as any,
+            qqLyricsApiLyrics: null as any,
+            kugouLyricsApiLyrics: null as any
         };
 
         let artistAlbumSongCombos: { artist: string, song: string, album: string | null }[] = [
@@ -89,7 +93,6 @@ export class LyricsService {
                 artist: artists.join(', '), album: album || null, song
             }
         ];
-        // Note: The commented out combos in GetLyrics.ts are skipped here too.
 
         let foundStats = [];
         for (let index in artistAlbumSongCombos) {
@@ -114,32 +117,36 @@ export class LyricsService {
                     if (lyrics) {
                         response.musixmatchWordByWordLyrics = lyrics.richSynced;
                         response.musixmatchSyncedLyrics = lyrics.synced;
-                        response.debugInfo = lyrics.debugInfo;
                     }
                 })
                 .catch(e => {
                     mxmError = e;
                 });
 
-            // GoLyrics
-            let goLyrics;
+            // Boidu sources
+            let boiduPromises = [];
             if (duration) {
-                goLyrics = this.goLyrics.getLrc(videoId, {
+                const boiduParams = {
                     song: combo.song,
                     artist: combo.artist,
                     album: combo.album,
                     duration: duration
-                }).then(lyrics => {
-                    if (lyrics) {
-                        response.goLyricsApiTtml = lyrics.ttml;
-                    }
-                });
+                };
+                boiduPromises.push(this.goLyrics.getLrc(videoId, boiduParams).then(lyrics => {
+                    if (lyrics) response.goLyricsApiLyrics = lyrics.lyrics;
+                }));
+                boiduPromises.push(this.qqLyrics.getLrc(videoId, boiduParams).then(lyrics => {
+                    if (lyrics) response.qqLyricsApiLyrics = lyrics.lyrics;
+                }));
+                boiduPromises.push(this.kugouLyrics.getLrc(videoId, boiduParams).then(lyrics => {
+                    if (lyrics) response.kugouLyricsApiLyrics = lyrics.lyrics;
+                }));
             }
 
-            await Promise.all([goLyrics, musixmatchLyrics]);
+            await Promise.all([...boiduPromises, musixmatchLyrics]);
 
             let lrcLibTimeout;
-            if (response.goLyricsApiTtml) {
+            if (response.goLyricsApiLyrics || response.qqLyricsApiLyrics || response.kugouLyricsApiLyrics) {
                 lrcLibTimeout = 4;
             } else {
                 lrcLibTimeout = 0.5;
@@ -151,11 +158,14 @@ export class LyricsService {
                 'hasLrcLibSynced': isTruthy(response.lrclibSyncedLyrics),
                 'hasMusixmatchSynced': isTruthy(response.musixmatchSyncedLyrics),
                 'hasLrcLibPlain': isTruthy(response.lrclibPlainLyrics),
-                'hasGoLyricsApiTtml': isTruthy(response.goLyricsApiTtml),
+                'hasGoLyricsApiLyrics': isTruthy(response.goLyricsApiLyrics),
+                'hasQqLyricsApiLyrics': isTruthy(response.qqLyricsApiLyrics),
+                'hasKugouLyricsApiLyrics': isTruthy(response.kugouLyricsApiLyrics),
                 'musixMatchError': mxmError
             });
 
-            if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml)) {
+            if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || 
+                isTruthy(response.goLyricsApiLyrics) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics)) {
                 response.song = combo.song;
                 response.artist = combo.artist;
                 response.album = combo.album;
@@ -163,14 +173,17 @@ export class LyricsService {
             }
         }
 
+        const hasAnySynced = isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || 
+                             isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiLyrics) || 
+                             isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics);
+
         observe({
             combos: artistAlbumSongCombos,
             foundStats: foundStats,
-            foundSyncedLyrics: isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml),
+            foundSyncedLyrics: hasAnySynced,
             foundPlainLyrics: isTruthy(response.lrclibPlainLyrics),
             foundRichSyncedLyrics: isTruthy(response.musixmatchSyncedLyrics),
-            foundTtml: isTruthy(response.goLyricsApiTtml),
-            foundLyrics: isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.lrclibPlainLyrics) || isTruthy(response.goLyricsApiTtml),
+            foundLyrics: hasAnySynced || isTruthy(response.lrclibPlainLyrics),
             response: response
         });
 

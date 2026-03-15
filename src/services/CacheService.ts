@@ -3,7 +3,7 @@ import pako from 'pako';
 import { addAwait, observe } from '../observability';
 
 export type LyricType = 'rich_sync' | 'normal_sync' | 'ttml';
-export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib';
+export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib' | 'qq' | 'kugou';
 
 export interface Lyric {
     format: LyricType;
@@ -129,9 +129,10 @@ export class CacheService {
         }
     }
 
-    async getGoLyrics(source_platform: SourcePlatform, source_track_id: string): Promise<{ lyrics: Lyric[], lastUpdatedAt: number } | null> {
+    private async _getBoiduLyrics(tableName: string, source_platform: SourcePlatform, source_track_id: string): Promise<{ lyrics: Lyric[], lastUpdatedAt: number } | null> {
+        // Warning: tableName must be sanitized. Since we only pass hardcoded table names, it's safe.
         const stmt = this.env.DB.prepare(`
-            SELECT r2_key, last_accessed_at, last_updated_at FROM go_lyrics_cache WHERE video_id = ?1 AND source_platform = ?2
+            SELECT r2_key, last_accessed_at, last_updated_at FROM ${tableName} WHERE video_id = ?1 AND source_platform = ?2
         `);
         const result = await stmt.bind(source_track_id, source_platform).first<{ r2_key: string, last_accessed_at: number, last_updated_at: number }>();
 
@@ -140,7 +141,7 @@ export class CacheService {
         const now = Math.floor(Date.now() / 1000);
         if (now - result.last_accessed_at > 86400) {
              addAwait(
-                this.env.DB.prepare("UPDATE go_lyrics_cache SET last_accessed_at = ?1 WHERE video_id = ?2 AND source_platform = ?3")
+                this.env.DB.prepare(`UPDATE ${tableName} SET last_accessed_at = ?1 WHERE video_id = ?2 AND source_platform = ?3`)
                 .bind(now, source_track_id, source_platform).run()
             );
         }
@@ -155,15 +156,15 @@ export class CacheService {
         return { lyrics: [{ format: 'ttml', content }], lastUpdatedAt };
     }
 
-    async saveGoLyrics(data: SaveLyricsData): Promise<boolean> {
+    private async _saveBoiduLyrics(tableName: string, data: SaveLyricsData, providerName: string): Promise<boolean> {
         try {
             const compressed = pako.deflate(data.lyric_content);
-            const r2Key = `${data.source_track_id}/${data.lyric_format}.gz`;
+            const r2Key = `${data.source_track_id}/${providerName}_ttml.gz`;
             await this.env.LYRICS_BUCKET.put(r2Key, compressed);
 
             const now = Math.floor(Date.now() / 1000);
             await this.env.DB.prepare(`
-                INSERT INTO go_lyrics_cache (video_id, source_platform, r2_key, last_accessed_at, last_updated_at)
+                INSERT INTO ${tableName} (video_id, source_platform, r2_key, last_accessed_at, last_updated_at)
                 VALUES (?1, ?2, ?3, ?4, ?4)
                 ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, last_accessed_at = ?4, last_updated_at = ?4
             `).bind(data.source_track_id, data.source_platform, r2Key, now).run();
@@ -171,6 +172,30 @@ export class CacheService {
         } catch (e) {
             return false;
         }
+    }
+
+    async getGoLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this._getBoiduLyrics('go_lyrics_cache', source_platform, source_track_id);
+    }
+
+    async saveGoLyrics(data: SaveLyricsData) {
+        return this._saveBoiduLyrics('go_lyrics_cache', data, 'go');
+    }
+
+    async getQqLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this._getBoiduLyrics('qq_lyrics_cache', source_platform, source_track_id);
+    }
+
+    async saveQqLyrics(data: SaveLyricsData) {
+        return this._saveBoiduLyrics('qq_lyrics_cache', data, 'qq');
+    }
+
+    async getKugouLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this._getBoiduLyrics('kugou_lyrics_cache', source_platform, source_track_id);
+    }
+
+    async saveKugouLyrics(data: SaveLyricsData) {
+        return this._saveBoiduLyrics('kugou_lyrics_cache', data, 'kugou');
     }
 
     async getLrcLib(source_platform: SourcePlatform, source_track_id: string): Promise<{ synced: string | null, unsynced: string | null, lastUpdatedAt: number } | null> {
@@ -264,6 +289,8 @@ export class CacheService {
 
          // 2. Delete GoLyrics cache
          await this.env.DB.prepare("DELETE FROM go_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
+         await this.env.DB.prepare("DELETE FROM qq_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
+         await this.env.DB.prepare("DELETE FROM kugou_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
 
          // 3. Delete YouTube metadata cache
          await this.env.DB.prepare("DELETE FROM youtube_cache WHERE video_id = ?1").bind(videoId).run();

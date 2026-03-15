@@ -9,12 +9,13 @@ export const LyricsResponseSchema = z.object({
   parsedSongAndArtist: z.string().nullable(),
   videoId: z.string().nullable(),
   description: z.string().nullable(),
-  debugInfo: z.any().nullable(),
   musixmatchWordByWordLyrics: z.any().nullable(),
   musixmatchSyncedLyrics: z.any().nullable(),
   lrclibSyncedLyrics: z.any().nullable(),
   lrclibPlainLyrics: z.any().nullable(),
-  goLyricsApiTtml: z.any().nullable(),
+  goLyricsApiLyrics: z.any().nullable(),
+  qqLyricsApiLyrics: z.any().nullable(),
+  kugouLyricsApiLyrics: z.any().nullable(),
 });
 
 export type LyricsResponse = z.infer<typeof LyricsResponseSchema>;
