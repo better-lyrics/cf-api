@@ -123,8 +123,8 @@ export class CacheService {
 
             await this.env.DB.batch(finalStmts);
             return true;
-        } catch (e) {
-            console.error("Save MM failed", e);
+        } catch (error) {
+            console.error("Save MM failed", error);
             return false;
         }
     }
@@ -169,7 +169,7 @@ export class CacheService {
                 ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, last_accessed_at = ?4, last_updated_at = ?4
             `).bind(data.source_track_id, data.source_platform, r2Key, now).run();
             return true;
-        } catch (e) {
+        } catch (_e) {
             return false;
         }
     }

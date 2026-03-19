@@ -30,17 +30,17 @@ export class LyricsService {
         let song: string | null | undefined = params.get('song');
         let album: string | null | undefined = params.get('album');
         let duration: string | null | undefined = params.get('duration');
-        let parsedSongAndArtist: string | null = null;
-        let videoId = params.get("videoId");
-        let alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
-        let description: string | null = null;
+        const parsedSongAndArtist: string | null = null;
+        const videoId = params.get("videoId");
+        const alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
+        const description: string | null = null;
 
         if (!videoId) {
              throw new Error("Invalid Video Id");
         }
 
         // Token Promise
-        let tokenPromise = this.musixmatch.getToken();
+        const tokenPromise = this.musixmatch.getToken();
 
         let artists: string[] = [];
         if (artist) {
@@ -71,7 +71,7 @@ export class LyricsService {
             };
         }
 
-        let response = {
+        const response = {
             song,
             artist,
             album,
@@ -88,18 +88,18 @@ export class LyricsService {
             kugouLyricsApiLyrics: null as any
         };
 
-        let artistAlbumSongCombos: { artist: string, song: string, album: string | null }[] = [
+        const artistAlbumSongCombos: { artist: string, song: string, album: string | null }[] = [
             {
                 artist: artists.join(', '), album: album || null, song
             }
         ];
 
-        let foundStats = [];
-        for (let index in artistAlbumSongCombos) {
-            let combo = artistAlbumSongCombos[index];
+        const foundStats = [];
+        for (const index in artistAlbumSongCombos) {
+            const combo = artistAlbumSongCombos[index];
 
             // LrcLib
-            let lrcLibLyricsPromise = this.lrcLib.getLyrics(videoId, combo.artist, combo.song, combo.album, duration)
+            const lrcLibLyricsPromise = this.lrcLib.getLyrics(videoId, combo.artist, combo.song, combo.album, duration)
                 .then(lyrics => {
                     if (lyrics) {
                         response.lrclibSyncedLyrics = lyrics.synced;
@@ -108,11 +108,11 @@ export class LyricsService {
                     return lyrics;
                 });
             
-            let lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)]);
+            const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)]);
 
             // Musixmatch
             let mxmError = null;
-            let musixmatchLyrics = this.musixmatch.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise)
+            const musixmatchLyrics = this.musixmatch.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise)
                 .then(lyrics => {
                     if (lyrics) {
                         response.musixmatchWordByWordLyrics = lyrics.richSynced;
@@ -124,7 +124,7 @@ export class LyricsService {
                 });
 
             // Boidu sources
-            let boiduPromises = [];
+            const boiduPromises = [];
             if (duration) {
                 const boiduParams = {
                     song: combo.song,
@@ -195,15 +195,15 @@ export class LyricsService {
         let song: string | null | undefined = params.get('song');
         let album: string | null | undefined = params.get('album');
         let duration: string | null | undefined = params.get('duration');
-        let videoId = params.get("videoId");
-        let alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
+        const videoId = params.get("videoId");
+        const alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
 
         if (!videoId) {
             throw new Error("Invalid Video Id");
         }
 
         // Token Promise (start early)
-        let tokenPromise = this.musixmatch.getToken();
+        const tokenPromise = this.musixmatch.getToken();
 
         let artists: string[] = [];
         if (artist) {
@@ -324,5 +324,79 @@ export class LyricsService {
         onEvent({ type: 'done', data: {} });
 
         return fullResponse;
+    }
+
+    async revalidateLyrics(params: URLSearchParams): Promise<any> {
+        const videoId = params.get("videoId");
+        if (!videoId) throw new Error("Invalid Video Id");
+
+        let artist = params.get('artist');
+        let song = params.get('song');
+        let album = params.get('album');
+        let duration = params.get('duration');
+        const alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
+
+        const status: any = {};
+        
+        // 1. Metadata
+        // Always force metadata fetch for revalidation
+        const metadataResult = await this.metadataService.getMetadata(videoId, alwaysFetchMetadata, true);
+        status.metadata = { 
+            action: metadataResult?.action || 'failed', 
+            timestamp: metadataResult?.timestamp,
+            details: metadataResult?.found ? 'Found metadata' : 'Metadata not found'
+        };
+
+        if (metadataResult && metadataResult.found) {
+            if (!song) song = metadataResult.song;
+            if (!artist && metadataResult.artists) artist = metadataResult.artists.join(', ');
+            if (!album) album = metadataResult.album;
+            if (!duration) duration = metadataResult.duration?.toString() ?? null;
+        }
+
+        if (!song || !artist) {
+            return { success: false, videoId, status, message: "Metadata insufficient for lyrics fetch and no overrides provided" };
+        }
+
+        const tokenPromise = this.musixmatch.getToken(true).catch(e => {
+            status.musixmatch = { action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
+        });
+
+        const combo = { artist, song, album: album || null };
+
+        // 2. LrcLib
+        const lrcLibResult = await this.lrcLib.getLyrics(videoId, combo.artist, combo.song, combo.album, duration, true);
+        status.lrclib = { 
+            action: lrcLibResult?.action || 'failed', 
+            timestamp: lrcLibResult?.timestamp,
+            error: lrcLibResult?.error
+        };
+
+        // 3. Musixmatch
+        if (!status.musixmatch) { // If token fetch didn't already fail it
+            const lrcLibPromiseRace = Promise.resolve(lrcLibResult);
+            const mxmResult = await this.musixmatch.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise as Promise<void>, true);
+            status.musixmatch = { 
+                action: mxmResult?.action || 'failed', 
+                timestamp: mxmResult?.timestamp,
+                error: mxmResult?.error
+            };
+        }
+
+        // 4. Boidu sources
+        if (duration) {
+            const boiduParams = { song: combo.song, artist: combo.artist, album: combo.album, duration: duration };
+            
+            const goResult = await this.goLyrics.getLrc(videoId, boiduParams, true);
+            status.golyrics = { action: goResult?.action || 'failed', timestamp: goResult?.timestamp, error: goResult?.error };
+            
+            const qqResult = await this.qqLyrics.getLrc(videoId, boiduParams, true);
+            status.qq = { action: qqResult?.action || 'failed', timestamp: qqResult?.timestamp, error: qqResult?.error };
+            
+            const kugouResult = await this.kugouLyrics.getLrc(videoId, boiduParams, true);
+            status.kugou = { action: kugouResult?.action || 'failed', timestamp: kugouResult?.timestamp, error: kugouResult?.error };
+        }
+
+        return { success: true, videoId, status };
     }
 }

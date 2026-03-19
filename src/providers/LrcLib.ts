@@ -30,7 +30,7 @@ export class LrcLib {
     }
 
     private async fetchAndSave(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LrcLibLyrics | null> {
-        let fetchUrl = new URL(LRCLIB_API);
+        const fetchUrl = new URL(LRCLIB_API);
         fetchUrl.searchParams.append('artist_name', artist);
         fetchUrl.searchParams.append('track_name', song);
         if (album) {
@@ -83,44 +83,56 @@ export class LrcLib {
         }
     }
 
-    async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LrcLibLyrics | null> {
-        // 1. Check Negative Cache
-        const negativeStatus = await this.cacheService.getNegative('lrclib', videoId);
-        if (negativeStatus.hit) {
-            if (negativeStatus.stale) {
-                // SWR: Return null, but fetch in background
-                addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
-            }
-            return null;
-        }
-
-        // 2. Check Positive Cache
-        let cachedData = await this.cacheService.getLrcLib("youtube_music", videoId);
-        let shouldRefetch = false;
-
-        if (cachedData) {
-            const now = Math.floor(Date.now() / 1000);
-            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : 1 * 86400;
-            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : 0.2;
-
-            if (now - cachedData.lastUpdatedAt > threshold) {
-                if (Math.random() < chance) {
-                    shouldRefetch = true;
-                    observe({ 'lrclibCacheRefetch': true });
+    async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined, force: boolean = false): Promise<LrcLibLyrics & { action?: string, timestamp?: number, error?: string } | null> {
+        if (!force) {
+            // 1. Check Negative Cache
+            const negativeStatus = await this.cacheService.getNegative('lrclib', videoId);
+            if (negativeStatus.hit) {
+                if (negativeStatus.stale) {
+                    // SWR: Return null, but fetch in background
+                    addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
                 }
+                return null;
             }
 
-            if (shouldRefetch) {
-                addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
-            }
+            // 2. Check Positive Cache
+            const cachedData = await this.cacheService.getLrcLib("youtube_music", videoId);
+            let shouldRefetch = false;
 
-            return {
-                synced: cachedData.synced,
-                unsynced: cachedData.unsynced
-            };
+            if (cachedData) {
+                const now = Math.floor(Date.now() / 1000);
+                const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : 1 * 86400;
+                const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : 0.2;
+
+                if (now - cachedData.lastUpdatedAt > threshold) {
+                    if (Math.random() < chance) {
+                        shouldRefetch = true;
+                        observe({ 'lrclibCacheRefetch': true });
+                    }
+                }
+
+                if (shouldRefetch) {
+                    addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
+                }
+
+                return {
+                    synced: cachedData.synced,
+                    unsynced: cachedData.unsynced,
+                    action: 'same',
+                    timestamp: cachedData.lastUpdatedAt
+                };
+            }
         }
 
         // 3. Fetch Synchronously
-        return this.fetchAndSave(videoId, artist, song, album, duration);
+        try {
+            const result = await this.fetchAndSave(videoId, artist, song, album, duration);
+            if (result) {
+                return { ...result, action: 'updated', timestamp: Math.floor(Date.now() / 1000) };
+            }
+            return null;
+        } catch (e: any) {
+            return { synced: null, unsynced: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
+        }
     }
 }

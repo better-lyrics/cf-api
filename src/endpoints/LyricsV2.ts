@@ -41,7 +41,7 @@ export class LyricsV2 extends OpenAPIRoute {
         const env = c.env;
         const request = c.req.raw;
 
-        if (!(env.BYPASS_AUTH && env.BYPASS_AUTH === "true")) {
+        if (!(env.BYPASS_AUTH === "true")) {
             const authHeader = request.headers.get('Authorization');
             if (!authHeader || !authHeader.startsWith('Bearer ')) {
                 return c.json({ error: 'Authorization header missing or malformed' }, 403);
@@ -54,7 +54,7 @@ export class LyricsV2 extends OpenAPIRoute {
         }
 
         const cache = caches.default;
-        let cachedResponse = await cache.match(request.url);
+        const cachedResponse = await cache.match(request.url);
         
         const { readable, writable } = new TransformStream();
         const writer = writable.getWriter();
@@ -115,8 +115,6 @@ export class LyricsV2 extends OpenAPIRoute {
                     "Content-Type": "text/event-stream",
                     "Cache-Control": "no-cache",
                     "Connection": "keep-alive",
-                    'Access-Control-Allow-Origin': 'https://music.youtube.com',
-                    'Access-Control-Allow-Credentials': 'true',
                 }
              });
         }
@@ -134,15 +132,7 @@ export class LyricsV2 extends OpenAPIRoute {
 
                 if (fullResult) {
                     // Cache the full result for future requests (v1 or v2)
-                    let corsHeaders =  {
-                        "Content-Type": "application/json",
-                        'Access-Control-Allow-Origin': 'https://music.youtube.com',
-                        'Access-Control-Allow-Credentials': 'true',
-                        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                        'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-                        'Vary': 'Origin'
-                    };
-                    const cacheResponse = Response.json(fullResult, { headers: corsHeaders });
+                    const cacheResponse = Response.json(fullResult);
                     if (fullResult.musixmatchSyncedLyrics || fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics) {
                         cacheResponse.headers.set('Cache-control', 'public; max-age=1080');
                     } else {
@@ -163,8 +153,6 @@ export class LyricsV2 extends OpenAPIRoute {
                 "Content-Type": "text/event-stream",
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                'Access-Control-Allow-Origin': 'https://music.youtube.com',
-                'Access-Control-Allow-Credentials': 'true',
             }
         });
     }

@@ -55,9 +55,9 @@ export class BoiduLyricsApi {
             return Promise.reject("Body is missing");
         }
 
-        let teeBody = response.body.tee();
-        let newResponse = new Response(teeBody[1], response); // make mutable
-        let keys = [...newResponse.headers.keys()];
+        const teeBody = response.body.tee();
+        const newResponse = new Response(teeBody[1], response); // make mutable
+        const keys = [...newResponse.headers.keys()];
         keys.forEach((key) => newResponse.headers.delete(key));
 
         observe({ [`${this.sourceName}Api`]: { responseStatus: response.status } });
@@ -117,52 +117,62 @@ export class BoiduLyricsApi {
         };
     }
 
-    async getLrc(videoId: string, providerParameters: BoiduLyricsApiParameters): Promise<BoiduLyrics | null> {
+    async getLrc(videoId: string, providerParameters: BoiduLyricsApiParameters, force: boolean = false): Promise<BoiduLyrics & { action?: string, timestamp?: number, error?: string } | null> {
 
-        // 1. Check Negative Cache
-        const negativeStatus = await this.cacheService.getNegative(this.sourceName, videoId);
-        if (negativeStatus.hit) {
-            if (negativeStatus.stale) {
-                // SWR: Return null, but fetch in background
-                addAwait(this.fetchAndSave(videoId, providerParameters));
-            }
-            return null;
-        }
-
-        // 2. Check Positive Cache
-        let cachedData = await this.getCache("youtube_music", videoId);
-        let shouldRefetch = false;
-
-        if (cachedData) {
-            const now = Math.floor(Date.now() / 1000);
-            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
-            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
-
-            if (now - cachedData.lastUpdatedAt > threshold) {
-                if (Math.random() < chance) {
-                    shouldRefetch = true;
-                    observe({ [`${this.sourceName}CacheRefetch`]: true });
+        if (!force) {
+            // 1. Check Negative Cache
+            const negativeStatus = await this.cacheService.getNegative(this.sourceName, videoId);
+            if (negativeStatus.hit) {
+                if (negativeStatus.stale) {
+                    // SWR: Return null, but fetch in background
+                    addAwait(this.fetchAndSave(videoId, providerParameters));
                 }
+                return null;
             }
 
-            if (shouldRefetch) {
-                // SWR: Use cached data, but fetch in background
-                addAwait(this.fetchAndSave(videoId, providerParameters));
-            }
+            // 2. Check Positive Cache
+            const cachedData = await this.getCache("youtube_music", videoId);
+            let shouldRefetch = false;
 
-            // Return cached data
-            let ttml: string | null = null;
-            for (const lyric of cachedData.lyrics) {
-                if (lyric.format == "ttml") {
-                    ttml = lyric.content;
+            if (cachedData) {
+                const now = Math.floor(Date.now() / 1000);
+                const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
+                const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
+
+                if (now - cachedData.lastUpdatedAt > threshold) {
+                    if (Math.random() < chance) {
+                        shouldRefetch = true;
+                        observe({ [`${this.sourceName}CacheRefetch`]: true });
+                    }
                 }
+
+                if (shouldRefetch) {
+                    // SWR: Use cached data, but fetch in background
+                    addAwait(this.fetchAndSave(videoId, providerParameters));
+                }
+
+                // Return cached data
+                let ttml: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "ttml") {
+                        ttml = lyric.content;
+                    }
+                }
+                return {
+                    lyrics: ttml, action: 'same', timestamp: cachedData.lastUpdatedAt
+                };
             }
-            return {
-                lyrics: ttml
-            };
         }
 
         // 3. No Cache, Fetch Synchronously
-        return this.fetchAndSave(videoId, providerParameters);
+        try {
+            const result = await this.fetchAndSave(videoId, providerParameters);
+            if (result) {
+                return { ...result, action: 'updated', timestamp: Math.floor(Date.now() / 1000) };
+            }
+            return null;
+        } catch (e: any) {
+            return { lyrics: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
+        }
     }
 }
