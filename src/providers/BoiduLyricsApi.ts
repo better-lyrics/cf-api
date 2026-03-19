@@ -1,33 +1,39 @@
 import { addAwait, observe } from '../observability';
-import { LyricsResponse } from '../LyricUtils';
-import { CacheService } from '../services/CacheService';
+import { CacheService, SaveLyricsData, SourcePlatform } from '../services/CacheService';
 import { Env } from '../types';
 
 const Constants = {
     LYRICS_API_URL: 'https://lyrics-api.boidu.dev/getLyrics'
 }
 
-export interface GoLyricsApiParameters {
+export interface BoiduLyricsApiParameters {
     song: string;
     artist: string;
     album: string | null;
     duration: string;
 }
 
-const DEFAULT_REFETCH_THRESHOLD = 1 * 86400;
-const DEFAULT_REFETCH_CHANCE = 0.2;
+const DEFAULT_REFETCH_THRESHOLD = 2 * 86400;
+const DEFAULT_REFETCH_CHANCE = 0.15;
+export interface BoiduLyrics {
+    lyrics: string | null;
+}
 
-export class GoLyricsApi {
-    private readonly ROOT_URL = Constants.LYRICS_API_URL;
+
+export class BoiduLyricsApi {
+    private readonly ROOT_URL: string;
+    private readonly sourceName: SourcePlatform;
     private cacheService: CacheService;
     private env: Env;
 
-    constructor(env: Env) {
+    constructor(env: Env, sourceName: SourcePlatform = 'golyrics', endpointUrl: string = Constants.LYRICS_API_URL) {
         this.env = env;
         this.cacheService = new CacheService(env);
+        this.sourceName = sourceName;
+        this.ROOT_URL = endpointUrl;
     }
 
-    private async _get(providerParameters: GoLyricsApiParameters): Promise<Response> {
+    private async _get(providerParameters: BoiduLyricsApiParameters): Promise<Response> {
         const url = new URL(this.ROOT_URL);
         url.searchParams.append("s", providerParameters.song);
         url.searchParams.append("a", providerParameters.artist);
@@ -54,25 +60,35 @@ export class GoLyricsApi {
         let keys = [...newResponse.headers.keys()];
         keys.forEach((key) => newResponse.headers.delete(key));
 
-        observe({'goLyricsApi': {responseStatus: response.status }});
-
-
+        observe({ [`${this.sourceName}Api`]: { responseStatus: response.status } });
 
         return new Response(teeBody[0], newResponse);
     }
 
-    private async fetchAndSave(videoId: string, providerParameters: GoLyricsApiParameters): Promise<LyricsResponse | null> {
+    private async getCache(sourcePlatform: SourcePlatform, videoId: string) {
+        if (this.sourceName === 'qq') return this.cacheService.getQqLyrics(sourcePlatform, videoId);
+        if (this.sourceName === 'kugou') return this.cacheService.getKugouLyrics(sourcePlatform, videoId);
+        return this.cacheService.getGoLyrics(sourcePlatform, videoId);
+    }
+
+    private async saveCache(data: SaveLyricsData) {
+        if (this.sourceName === 'qq') return this.cacheService.saveQqLyrics(data);
+        if (this.sourceName === 'kugou') return this.cacheService.saveKugouLyrics(data);
+        return this.cacheService.saveGoLyrics(data);
+    }
+
+    private async fetchAndSave(videoId: string, providerParameters: BoiduLyricsApiParameters): Promise<BoiduLyrics | null> {
         const response = await this._get(providerParameters);
 
         if (response.status !== 200) {
             observe({
-                goLyricsApiError: {
+                [`${this.sourceName}ApiError`]: {
                     'invalidStatusCode': response.status,
                     body: await response.text(),
                 }
             });
             if (response.status === 404) {
-                 addAwait(this.cacheService.saveNegative('golyrics', videoId));
+                addAwait(this.cacheService.saveNegative(this.sourceName, videoId));
             }
             return null;
         }
@@ -81,7 +97,7 @@ export class GoLyricsApi {
 
         if (ttml) {
             addAwait(
-                this.cacheService.saveGoLyrics({
+                this.saveCache({
                     source_track_id: videoId,
                     source_platform: "youtube_music",
                     lyric_format: "ttml",
@@ -90,25 +106,21 @@ export class GoLyricsApi {
             );
 
             addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                .bind('golyrics', videoId).run());
+                .bind(this.sourceName, videoId).run());
 
         } else {
-             addAwait(this.cacheService.saveNegative('golyrics', videoId));
+            addAwait(this.cacheService.saveNegative(this.sourceName, videoId));
         }
 
         return {
-            ttml: ttml,
-            richSynced: null,
-            synced: null,
-            unsynced: null,
-            debugInfo: null
+            lyrics: ttml
         };
     }
 
-    async getLrc(videoId: string, providerParameters: GoLyricsApiParameters): Promise<LyricsResponse | null> {
+    async getLrc(videoId: string, providerParameters: BoiduLyricsApiParameters): Promise<BoiduLyrics | null> {
 
         // 1. Check Negative Cache
-        const negativeStatus = await this.cacheService.getNegative('golyrics', videoId);
+        const negativeStatus = await this.cacheService.getNegative(this.sourceName, videoId);
         if (negativeStatus.hit) {
             if (negativeStatus.stale) {
                 // SWR: Return null, but fetch in background
@@ -118,7 +130,7 @@ export class GoLyricsApi {
         }
 
         // 2. Check Positive Cache
-        let cachedData = await this.cacheService.getGoLyrics("youtube_music", videoId);
+        let cachedData = await this.getCache("youtube_music", videoId);
         let shouldRefetch = false;
 
         if (cachedData) {
@@ -129,13 +141,13 @@ export class GoLyricsApi {
             if (now - cachedData.lastUpdatedAt > threshold) {
                 if (Math.random() < chance) {
                     shouldRefetch = true;
-                    observe({ 'goLyricsCacheRefetch': true });
+                    observe({ [`${this.sourceName}CacheRefetch`]: true });
                 }
             }
 
             if (shouldRefetch) {
-                 // SWR: Use cached data, but fetch in background
-                 addAwait(this.fetchAndSave(videoId, providerParameters));
+                // SWR: Use cached data, but fetch in background
+                addAwait(this.fetchAndSave(videoId, providerParameters));
             }
 
             // Return cached data
@@ -146,13 +158,7 @@ export class GoLyricsApi {
                 }
             }
             return {
-                ttml: ttml,
-                richSynced: null,
-                synced: null,
-                unsynced: null,
-                debugInfo: {
-                    comment: 'goLyricsApi cache'
-                }
+                lyrics: ttml
             };
         }
 
