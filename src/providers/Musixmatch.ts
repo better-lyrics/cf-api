@@ -138,7 +138,7 @@ export interface MusixmatchLyrics {
 // These fields can persist through multiple requests to the API
 let token: string | null = null; // null means we haven't gotten a token yet
 let tokenRetryCount = 0;
-let tokenRetryMax = 3;
+const tokenRetryMax = 3;
 
 const DEFAULT_REFETCH_THRESHOLD = 14 * 86400; // 2 week
 const DEFAULT_REFETCH_CHANCE = 0.02; // 2% chance if old
@@ -164,8 +164,8 @@ export class Musixmatch {
         let url = new URL(this.ROOT_URL + action);
         query.forEach(([key, value]) => url.searchParams.set(key, value));
 
-        let cacheUrl = url.toString();
-        let cachedResponse = await this.cache.match(cacheUrl);
+        const cacheUrl = url.toString();
+        const cachedResponse = await this.cache.match(cacheUrl);
         if (cachedResponse) {
             observe({ 'musixMatchCache': { found: true, cacheUrl: cacheUrl } });
             return cachedResponse;
@@ -202,10 +202,10 @@ export class Musixmatch {
             // Store any new cookies
             const newCookies = response.headers.getAll('Set-Cookie');
             newCookies.forEach((cookieStr) => {
-                    let splitIndex = cookieStr.indexOf('=');
+                    const splitIndex = cookieStr.indexOf('=');
                     if (splitIndex > -1) {
-                        let key = cookieStr.substring(0, splitIndex);
-                        let cookie = cookieStr.substring(splitIndex + 1, cookieStr.length).split(";")[0];
+                        const key = cookieStr.substring(0, splitIndex);
+                        const cookie = cookieStr.substring(splitIndex + 1, cookieStr.length).split(";")[0];
                         this.cookies.push({ key, cookie });
                     }
                 },
@@ -223,9 +223,9 @@ export class Musixmatch {
             return Promise.reject("Body is missing");
         }
 
-        let teeBody = response.body.tee();
+        const teeBody = response.body.tee();
         response = new Response(teeBody[1], response); // make mutable
-        let keys = [...response.headers.keys()];
+        const keys = [...response.headers.keys()];
         keys.forEach((key) => response.headers.delete(key));
 
 
@@ -241,9 +241,9 @@ export class Musixmatch {
         return new Response(teeBody[0], response);
     }
 
-    async getToken(): Promise<void> {
+    async getToken(force: boolean = false): Promise<void> {
         if (token === null && tokenRetryCount < tokenRetryMax) {
-            let response = await this._get('token.get', [['user_language', 'en']]);
+            const response = await this._get('token.get', [['user_language', 'en']]);
             const data = await response.json() as MusixmatchResponse;
 
             observe({ 'tokenStatus': data.message.header.status_code, 'tokenRetryCount': tokenRetryCount });
@@ -256,6 +256,9 @@ export class Musixmatch {
         } else {
             if (token === null) {
                 observe({ 'tokenStatus': 'too many retries', 'tokenRetryCount': tokenRetryCount });
+                if (force) {
+                    throw Error('Token ratelimited or unauthorized');
+                }
                 throw Error('Failed to get token');
             } else {
                 observe({ 'tokenStatus': 'token already valid', 'tokenRetryCount': tokenRetryCount });
@@ -275,7 +278,7 @@ export class Musixmatch {
         Promise<MusixmatchLyrics | null> {
 
 
-        let musixmatchBasicLyricsPromise = this.getLrcById(trackId);
+        const musixmatchBasicLyricsPromise = this.getLrcById(trackId);
         let basicLrcPromise: Promise<any | null | void>;
         if (lrcLyrics !== null) {
             basicLrcPromise = lrcLyrics;
@@ -294,7 +297,7 @@ export class Musixmatch {
         const richSyncBody = JSON.parse(data.message.body.richsync.richsync_body) as RichSyncBody[];
 
         let lrcStr = '';
-        let richSyncTokenArray: MatchingTimedWord[] = [];
+        const richSyncTokenArray: MatchingTimedWord[] = [];
 
         for (const item of richSyncBody) {
             lrcStr += `[${this.formatTime(item.ts)}] `;
@@ -317,17 +320,17 @@ export class Musixmatch {
 
 
 
-        let basicLrc = await basicLrcPromise;
+        const basicLrc = await basicLrcPromise;
         const synced = typeof basicLrc === 'string' ? basicLrc : (basicLrc && 'synced' in basicLrc ? basicLrc.synced : null);
         
         if (synced) {
-            let basicLrcOffset = [] as number[];
-            let diffDebug: { op: string, text: string }[] = [];
+            const basicLrcOffset = [] as number[];
+            const diffDebug: { op: string, text: string }[] = [];
 
-            let parsedLrc = parseLrc(synced);
-            let parsedLrcTokenArray: MatchingTimedWord[] = [];
+            const parsedLrc = parseLrc(synced);
+            const parsedLrcTokenArray: MatchingTimedWord[] = [];
             parsedLrc.forEach(({startTimeMs, words}, index) => {
-                let wordsSplit = words.split(' ');
+                const wordsSplit = words.split(' ');
                 for (let i = 0; i < wordsSplit.length; i++) {
                     if (i === 0) {
                         parsedLrcTokenArray.push({
@@ -357,15 +360,15 @@ export class Musixmatch {
                     richSynced: null, synced: (await musixmatchBasicLyricsPromise)?.synced || null
                 };
             }
-            let diff = diffArrays(parsedLrcTokenArray, richSyncTokenArray, { comparator: (left, right) => left.word.toLowerCase() === right.word.toLowerCase() });
+            const diff = diffArrays(parsedLrcTokenArray, richSyncTokenArray, { comparator: (left, right) => left.word.toLowerCase() === right.word.toLowerCase() });
 
             let leftIndex = 0;
             let rightIndex = 0;
             diff.forEach(change => {
                 if (!change.removed && !change.added && change.value && change.count !== undefined) {
                     for (let i = 0; i < change.count; i++) {
-                        let leftToken = parsedLrcTokenArray[leftIndex];
-                        let rightToken = richSyncTokenArray[rightIndex];
+                        const leftToken = parsedLrcTokenArray[leftIndex];
+                        const rightToken = richSyncTokenArray[rightIndex];
 
                         if (leftToken.wordTime !== -1 && rightToken.wordTime !== -1) {
                             basicLrcOffset.push(rightToken.wordTime - leftToken.wordTime);
@@ -388,7 +391,7 @@ export class Musixmatch {
                 }
             });
 
-            let meanVar = meanAndVariance(basicLrcOffset);
+            const meanVar = meanAndVariance(basicLrcOffset);
             mean = meanVar.mean;
             variance = meanVar.variance;
             if (variance < 1.5) {
@@ -426,7 +429,7 @@ export class Musixmatch {
             return null;
         }
 
-        let lrcStr = data.message.body.subtitle.subtitle_body;
+        const lrcStr = data.message.body.subtitle.subtitle_body;
 
         return { richSynced: null, synced: lrcStr };
     }
@@ -445,19 +448,18 @@ export class Musixmatch {
              return null;
         }
 
-        let query: [string, string][] = [
+        const query: [string, string][] = [
             ['q_track', track],
             ['q_artist', artist],
             ['page_size', '1'],
             ['page', '1'],
         ];
         if (album) {
-            // @ts-ignore
             query.push(['album', album]);
         }
         const response = await this._get('matcher.track.get', query);
 
-        let data = await response.json() as MusixmatchResponse;
+        const data = await response.json() as MusixmatchResponse;
         if (data.message.header.status_code === 401) {
             token = null;
         }
@@ -527,59 +529,86 @@ export class Musixmatch {
     }
 
 
-    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<any | null | void> | null, tokenPromise: Promise<void>):
-        Promise<MusixmatchLyrics | null> {
+    async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<any | null | void> | null, tokenPromise: Promise<void>, force: boolean = false):
+        Promise<MusixmatchLyrics & { action?: string, timestamp?: number, error?: string } | null> {
 
-        // 1. Check Negative Cache
-        const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
-        if (negativeStatus.hit) {
-            if (negativeStatus.stale) {
-                // SWR: Fetch in background
-                addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
-            }
-            return null;
-        }
+        // 1. Check Positive Cache (always check for comparison)
+        const cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
 
-        // 2. Check Positive Cache
-        let cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
-        let shouldRefetch = false;
-
-        if (cachedData) {
-            // Check stale
-            const now = Math.floor(Date.now() / 1000);
-            const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
-            const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
-
-            if (now - cachedData.lastUpdatedAt > threshold) {
-                if (Math.random() < chance) {
-                    shouldRefetch = true;
-                    observe({ 'musixmatchCacheRefetch': true });
+        if (!force) {
+            // 1. Check Negative Cache
+            const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
+            if (negativeStatus.hit) {
+                if (negativeStatus.stale) {
+                    // SWR: Fetch in background
+                    addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
                 }
+                return null;
             }
 
-            if (shouldRefetch) {
-                 // SWR: Use cached data, but fetch in background
-                 addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
-            }
+            let shouldRefetch = false;
 
-            let richSynced: string | null = null;
-            let normalSynced: string | null = null;
+            if (cachedData) {
+                // Check stale
+                const now = Math.floor(Date.now() / 1000);
+                const threshold = this.env.REFETCH_THRESHOLD ? parseInt(this.env.REFETCH_THRESHOLD) : DEFAULT_REFETCH_THRESHOLD;
+                const chance = this.env.REFETCH_CHANCE ? parseFloat(this.env.REFETCH_CHANCE) : DEFAULT_REFETCH_CHANCE;
 
-            for (const lyric of cachedData.lyrics) {
-                if (lyric.format == "rich_sync") {
-                    richSynced = lyric.content;
-                } else if (lyric.format == "normal_sync") {
-                    normalSynced = lyric.content;
+                if (now - cachedData.lastUpdatedAt > threshold) {
+                    if (Math.random() < chance) {
+                        shouldRefetch = true;
+                        observe({ 'musixmatchCacheRefetch': true });
+                    }
                 }
-            }
 
-            return {
-                richSynced: richSynced, synced: normalSynced
-            };
+                if (shouldRefetch) {
+                     // SWR: Use cached data, but fetch in background
+                     addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
+                }
+
+                let richSynced: string | null = null;
+                let normalSynced: string | null = null;
+
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "rich_sync") {
+                        richSynced = lyric.content;
+                    } else if (lyric.format == "normal_sync") {
+                        normalSynced = lyric.content;
+                    }
+                }
+
+                return {
+                    richSynced: richSynced, synced: normalSynced, action: 'same', timestamp: cachedData.lastUpdatedAt
+                };
+            }
         }
 
         // 3. Fetch from API
-        return this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise);
+        try {
+            const result = await this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise);
+            if (result) {
+                let action = 'updated';
+                let cachedRich: string | null = null;
+                let cachedNormal: string | null = null;
+                if (cachedData) {
+                    for (const lyric of cachedData.lyrics) {
+                        if (lyric.format == "rich_sync") {
+                            cachedRich = lyric.content;
+                        } else if (lyric.format == "normal_sync") {
+                            cachedNormal = lyric.content;
+                        }
+                    }
+                }
+
+                if (cachedRich === result.richSynced && cachedNormal === result.synced) {
+                    action = 'same';
+                }
+                return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
+            }
+            return null;
+        } catch (e: any) {
+            return { richSynced: null, synced: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
+        }
     }
 }
 

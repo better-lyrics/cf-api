@@ -32,6 +32,14 @@ export interface Env extends Omit<Cloudflare.Env, "DB"> {
     REFETCH_CHANCE?: string; // 0.0 to 1.0
     NEGATIVE_CACHE_TTL_LRCLIB?: string; // seconds
     NEGATIVE_CACHE_TTL_MUSIXMATCH?: string; // seconds
+    BYPASS_AUTH: string;
+    JWT_SECRET: string;
+    ADMIN_KEYS: string;
+    TURNSTILE_SECRET_KEY: string;
+    GOOGLE_API_KEY: string;
+    GO_API_KEY: string;
+    ALLOWED_ORIGINS: string;
+    LYRICS_BUCKET: R2Bucket;
 }
 
 export type AppContext = Context<{ Bindings: Env }>;

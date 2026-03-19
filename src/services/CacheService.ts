@@ -88,14 +88,45 @@ export class CacheService {
     async saveMusixmatchLyrics(data: SaveLyricsData): Promise<boolean> {
         if (!data.musixmatch_track_id) return false;
         try {
+            const now = Math.floor(Date.now() / 1000);
+
+            // 1. Check if there's an existing mapping for this source track
+            const existingMapping = await this.env.DB.prepare(`
+                SELECT t.id, t.musixmatch_track_id, l.format, l.r2_object_key
+                FROM track_mappings tm
+                JOIN tracks t ON tm.track_id = t.id
+                LEFT JOIN lyrics l ON t.id = l.track_id
+                WHERE tm.source_platform = ?1 AND tm.source_track_id = ?2
+            `).bind(data.source_platform, data.source_track_id).all<{
+                id: number;
+                musixmatch_track_id: number;
+                format: string | null;
+                r2_object_key: string | null;
+            }>();
+
+            // 2. If the musixmatch_track_id has changed, clean up the OLD R2 objects
+            // ONLY if they are not used by any OTHER source_track_id (though typically it's 1:1)
+            if (existingMapping.results && existingMapping.results.length > 0) {
+                const oldMxmId = existingMapping.results[0].musixmatch_track_id;
+                if (oldMxmId !== data.musixmatch_track_id) {
+                    for (const row of existingMapping.results) {
+                        if (row.r2_object_key) {
+                            // Only delete if it's NOT the same key we're about to write (unlikely if MXM ID changed)
+                            const newR2Key = `${data.musixmatch_track_id}/${data.lyric_format}.gz`;
+                            if (row.r2_object_key !== newR2Key) {
+                                addAwait(this.env.LYRICS_BUCKET.delete(row.r2_object_key));
+                            }
+                        }
+                    }
+                }
+            }
+
             const compressedContent = pako.deflate(data.lyric_content);
             const r2ObjectKey = `${data.musixmatch_track_id}/${data.lyric_format}.gz`;
 
             await this.env.LYRICS_BUCKET.put(r2ObjectKey, compressedContent);
 
-            const now = Math.floor(Date.now() / 1000);
-
-            // Insert/Update track
+            // 3. Insert/Update track
             await this.env.DB.prepare(`
                 INSERT INTO tracks (musixmatch_track_id, last_accessed_at, last_updated_at)
                 VALUES (?1, ?2, ?2)
@@ -112,19 +143,19 @@ export class CacheService {
                     INSERT INTO lyrics (track_id, format, r2_object_key)
                     VALUES (?1, ?2, ?3)
                     ON CONFLICT(r2_object_key) DO NOTHING
-                `).bind(track.id, data.lyric_format, r2ObjectKey), // Note: r2_object_key is UNIQUE in schema? Yes.
+                `).bind(track.id, data.lyric_format, r2ObjectKey),
 
                 this.env.DB.prepare(`
                     INSERT INTO track_mappings (source_platform, source_track_id, track_id)
                     VALUES (?1, ?2, ?3)
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT(source_platform, source_track_id) DO UPDATE SET track_id = ?3
                 `).bind(data.source_platform, data.source_track_id, track.id)
             ];
 
             await this.env.DB.batch(finalStmts);
             return true;
-        } catch (e) {
-            console.error("Save MM failed", e);
+        } catch (error) {
+            console.error("Save MM failed", error);
             return false;
         }
     }
@@ -169,7 +200,7 @@ export class CacheService {
                 ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, last_accessed_at = ?4, last_updated_at = ?4
             `).bind(data.source_track_id, data.source_platform, r2Key, now).run();
             return true;
-        } catch (e) {
+        } catch (_e) {
             return false;
         }
     }
@@ -281,22 +312,43 @@ export class CacheService {
     }
 
     async deleteCache(videoId: string): Promise<void> {
-         // 1. Delete mapping
-         const mapping = await this.env.DB.prepare("SELECT track_id FROM track_mappings WHERE source_track_id = ?1").bind(videoId).first<{track_id: number}>();
-         if (mapping) {
+         // 1. Delete mapping and cleanup Musixmatch R2
+         const mapping = await this.env.DB.prepare(`
+             SELECT l.r2_object_key 
+             FROM track_mappings tm
+             JOIN tracks t ON tm.track_id = t.id
+             LEFT JOIN lyrics l ON t.id = l.track_id
+             WHERE tm.source_track_id = ?1
+         `).bind(videoId).all<{r2_object_key: string | null}>();
+
+         if (mapping.results) {
+             for (const row of mapping.results) {
+                 if (row.r2_object_key) {
+                     addAwait(this.env.LYRICS_BUCKET.delete(row.r2_object_key));
+                 }
+             }
              await this.env.DB.prepare("DELETE FROM track_mappings WHERE source_track_id = ?1").bind(videoId).run();
          }
 
-         // 2. Delete GoLyrics cache
-         await this.env.DB.prepare("DELETE FROM go_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
-         await this.env.DB.prepare("DELETE FROM qq_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
-         await this.env.DB.prepare("DELETE FROM kugou_lyrics_cache WHERE video_id = ?1").bind(videoId).run();
+         // 2. Delete Boidu sources and cleanup R2
+         const boiduSources = ['go_lyrics_cache', 'qq_lyrics_cache', 'kugou_lyrics_cache'];
+         for (const table of boiduSources) {
+             const row = await this.env.DB.prepare(`SELECT r2_key FROM ${table} WHERE video_id = ?1`).bind(videoId).first<{r2_key: string}>();
+             if (row) {
+                 addAwait(this.env.LYRICS_BUCKET.delete(row.r2_key));
+                 await this.env.DB.prepare(`DELETE FROM ${table} WHERE video_id = ?1`).bind(videoId).run();
+             }
+         }
 
          // 3. Delete YouTube metadata cache
          await this.env.DB.prepare("DELETE FROM youtube_cache WHERE video_id = ?1").bind(videoId).run();
 
-         // 4. Delete LrcLib cache
-         await this.env.DB.prepare("DELETE FROM lrclib_cache WHERE video_id = ?1").bind(videoId).run();
+         // 4. Delete LrcLib cache and cleanup R2
+         const lrcLibRow = await this.env.DB.prepare("SELECT r2_key FROM lrclib_cache WHERE video_id = ?1").bind(videoId).first<{r2_key: string}>();
+         if (lrcLibRow) {
+             addAwait(this.env.LYRICS_BUCKET.delete(lrcLibRow.r2_key));
+             await this.env.DB.prepare("DELETE FROM lrclib_cache WHERE video_id = ?1").bind(videoId).run();
+         }
 
          // 5. Delete negative cache
          await this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_track_id = ?1").bind(videoId).run();

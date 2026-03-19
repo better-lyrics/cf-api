@@ -6,12 +6,17 @@
         "deploy": "wrangler deploy",
         "dev": "wrangler dev",
         "start": "wrangler dev",
-        "cf-typegen": "wrangler types"
+        "cf-typegen": "wrangler types",
+        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
     },
     "devDependencies": {
         "@types/diff": "^7.0.1",
         "@types/node": "^25.0.9",
+        "@typescript-eslint/eslint-plugin": "^8.21.0",
+        "@typescript-eslint/parser": "^8.21.0",
+        "eslint": "^9.19.0",
         "typescript": "^5.5.2",
+        "typescript-eslint": "^8.21.0",
         "wrangler": "^4.4.0"
     },
     "dependencies": {

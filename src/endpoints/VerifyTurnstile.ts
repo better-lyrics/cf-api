@@ -7,6 +7,7 @@ export class VerifyTurnstile extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
         summary: "Verify Turnstile Token",
         tags: ["Auth"],
+        security: [],
         request: {
             body: {
                 content: {
@@ -43,16 +44,12 @@ export class VerifyTurnstile extends OpenAPIRoute {
         }
 
         const isValid = await verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY);
-        const corsHeaders = {
-            'Access-Control-Allow-Origin': 'https://music.youtube.com',
-            'Access-Control-Allow-Credentials': 'true',
-        };
 
         if (isValid) {
             const jwt = await createJwt(c.env.JWT_SECRET, c.req.raw.headers.get("CF-Connecting-IP") || "");
-            return c.json({ jwt }, 200, corsHeaders);
+            return c.json({ jwt }, 200);
         } else {
-            return c.json({ error: 'Invalid Turnstile token' }, 401, corsHeaders);
+            return c.json({ error: 'Invalid Turnstile token' }, 401);
         }
     }
 }

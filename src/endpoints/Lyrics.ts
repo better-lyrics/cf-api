@@ -9,6 +9,11 @@ export class Lyrics extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
         summary: "Get Lyrics",
         tags: ["Lyrics"],
+        security: [
+            {
+                bearerAuth: [],
+            },
+        ],
         request: {
             query: z.object({
                 videoId: z.string(),
@@ -42,7 +47,7 @@ export class Lyrics extends OpenAPIRoute {
         const env = c.env;
         const request = c.req.raw;
 
-        if (!(env.BYPASS_AUTH && env.BYPASS_AUTH === "true")) {
+        if (!(env.BYPASS_AUTH === "true")) {
             const authHeader = request.headers.get('Authorization');
             if (!authHeader || !authHeader.startsWith('Bearer ')) {
                 return c.json({ error: 'Authorization header missing or malformed' }, 403);
@@ -55,7 +60,7 @@ export class Lyrics extends OpenAPIRoute {
         }
 
         const cache = caches.default;
-        let cachedResponse = await cache.match(request.url);
+        const cachedResponse = await cache.match(request.url);
         if (cachedResponse) {
              observe({ usingCachedLyrics: true });
              return cachedResponse;
@@ -68,16 +73,7 @@ export class Lyrics extends OpenAPIRoute {
         try {
             const result = await service.getLyrics(url.searchParams);
 
-            let corsHeaders =  {
-                "Content-Type": "application/json",
-                'Access-Control-Allow-Origin': 'https://music.youtube.com',
-                'Access-Control-Allow-Credentials': 'true',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-                'Access-Control-Allow-Headers': 'Authorization, Content-Type',
-                'Vary': 'Origin'
-            };
-
-            const response = c.json(result, 200, corsHeaders);
+            const response = c.json(result, 200);
 
             if (result.musixmatchSyncedLyrics || result.lrclibSyncedLyrics || result.goLyricsApiLyrics || result.qqLyricsApiLyrics || result.kugouLyricsApiLyrics) {
                 response.headers.set('Cache-control', 'public; max-age=1080');

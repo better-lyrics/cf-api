@@ -5,19 +5,28 @@ import { Lyrics } from "./endpoints/Lyrics";
 import { LyricsV2 } from "./endpoints/LyricsV2";
 import { VerifyTurnstile } from "./endpoints/VerifyTurnstile";
 import { DeleteCache } from "./endpoints/DeleteCache";
+import { RevalidateCache } from "./endpoints/RevalidateCache";
 import { flushObservability, runWithObservability } from "./observability";
 import { Env } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use('*', cors({
-    origin: 'https://music.youtube.com',
-    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Authorization', 'Content-Type'],
-    exposeHeaders: ['Content-Length'],
-    maxAge: 86400,
-    credentials: true,
-}));
+app.use('*', (c, next) => {
+    const allowedOrigins = c.env.ALLOWED_ORIGINS ? c.env.ALLOWED_ORIGINS.split(',') : ['https://music.youtube.com'];
+    return cors({
+        origin: (origin) => {
+            if (origin && (allowedOrigins.includes(origin) || allowedOrigins.includes('*'))) {
+                return origin;
+            }
+            return allowedOrigins[0];
+        },
+        allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+        allowHeaders: ['Authorization', 'Content-Type', 'x-admin-key', 'turnstile-token'],
+        exposeHeaders: ['Content-Length'],
+        maxAge: 86400,
+        credentials: true,
+    })(c, next);
+});
 
 app.onError((err, c) => {
     if (err instanceof ApiException) {
@@ -49,9 +58,26 @@ const openapi = fromHono(app, {
     },
 });
 
+openapi.registry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
+});
+openapi.registry.registerComponent("securitySchemes", "apiKeyAuth", {
+    type: "apiKey",
+    in: "header",
+    name: "x-admin-key",
+});
+openapi.registry.registerComponent("securitySchemes", "turnstileAuth", {
+    type: "apiKey",
+    in: "header",
+    name: "turnstile-token",
+});
+
 openapi.get("/lyrics", Lyrics);
 openapi.get("/v2/lyrics", LyricsV2);
 openapi.post("/verify-turnstile", VerifyTurnstile);
+openapi.post("/revalidate", RevalidateCache);
 openapi.delete("/cache", DeleteCache);
 
 // Manual route for assets
