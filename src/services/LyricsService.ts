@@ -189,4 +189,140 @@ export class LyricsService {
 
         return response;
     }
+
+    async getLyricsStreaming(params: URLSearchParams, onEvent: (event: any) => void): Promise<any> {
+        let artist: string | null | undefined = params.get('artist');
+        let song: string | null | undefined = params.get('song');
+        let album: string | null | undefined = params.get('album');
+        let duration: string | null | undefined = params.get('duration');
+        let videoId = params.get("videoId");
+        let alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
+
+        if (!videoId) {
+            throw new Error("Invalid Video Id");
+        }
+
+        // Token Promise (start early)
+        let tokenPromise = this.musixmatch.getToken();
+
+        let artists: string[] = [];
+        if (artist) {
+            artists = artist.split(',')
+                .flatMap(a => a.split('&'))
+                .map(a => a.trim()).filter(a => a.length > 0);
+        }
+
+        // Resolve Metadata first
+        if (alwaysFetchMetadata || !song || song.trim().length === 0 || artists.length === 0 || !album || album.length === 0) {
+            const metadata = await this.metadataService.getMetadata(videoId, alwaysFetchMetadata);
+            if (metadata && metadata.found) {
+                if (!song) song = metadata.song;
+                if (!artists || artists.length === 0) artists = metadata.artists || [];
+                if (artists && artists.length > 0) artist = artists.join(', ');
+                if (!album) album = metadata.album;
+                if (!duration) duration = metadata.duration?.toString();
+            }
+        }
+
+        if (!song || !artist) {
+            onEvent({ type: 'error', data: { message: "A Song or Artist wasn't provided and couldn't be inferred" } });
+            return null;
+        }
+
+        // Emit metadata immediately
+        onEvent({
+            type: 'metadata',
+            data: { song, artist, album, duration, videoId }
+        });
+
+        const fullResponse: any = {
+            song, artist, album, duration, videoId,
+            musixmatchWordByWordLyrics: null,
+            musixmatchSyncedLyrics: null,
+            lrclibSyncedLyrics: null,
+            lrclibPlainLyrics: null,
+            goLyricsApiLyrics: null,
+            qqLyricsApiLyrics: null,
+            kugouLyricsApiLyrics: null
+        };
+
+        const currentArtist = artists.join(', ');
+        const currentAlbum = album || null;
+        const currentSong = song;
+
+        // Providers
+        const promises: Promise<void>[] = [];
+
+        // LrcLib
+        const lrcLibLyricsPromise = this.lrcLib.getLyrics(videoId, currentArtist, currentSong, currentAlbum, duration)
+            .then(lyrics => {
+                if (lyrics) {
+                    fullResponse.lrclibSyncedLyrics = lyrics.synced;
+                    fullResponse.lrclibPlainLyrics = lyrics.unsynced;
+                    onEvent({
+                        type: 'provider',
+                        data: {
+                            provider: 'lrclib',
+                            results: { synced: lyrics.synced, plain: lyrics.unsynced }
+                        }
+                    });
+                }
+                return lyrics;
+            });
+        
+        const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)]);
+
+        // Musixmatch
+        promises.push(this.musixmatch.getLrc(videoId, currentArtist, currentSong, currentAlbum, lrcLibPromiseRace, tokenPromise)
+            .then(lyrics => {
+                if (lyrics) {
+                    fullResponse.musixmatchWordByWordLyrics = lyrics.richSynced;
+                    fullResponse.musixmatchSyncedLyrics = lyrics.synced;
+                    onEvent({
+                        type: 'provider',
+                        data: {
+                            provider: 'musixmatch',
+                            results: { wordByWord: lyrics.richSynced, synced: lyrics.synced }
+                        }
+                    });
+                }
+            })
+            .catch(e => {
+                console.error("Musixmatch error:", e);
+                onEvent({ type: 'error', data: { message: `Musixmatch error: ${e.message}` } });
+            }));
+
+        // Boidu sources
+        if (duration) {
+            const boiduParams = { song: currentSong, artist: currentArtist, album: currentAlbum, duration: duration };
+            
+            promises.push(this.goLyrics.getLrc(videoId, boiduParams).then(lyrics => {
+                if (lyrics) {
+                    fullResponse.goLyricsApiLyrics = lyrics.lyrics;
+                    onEvent({ type: 'provider', data: { provider: 'golyrics', results: { lyrics: lyrics.lyrics } } });
+                }
+            }));
+            
+            promises.push(this.qqLyrics.getLrc(videoId, boiduParams).then(lyrics => {
+                if (lyrics) {
+                    fullResponse.qqLyricsApiLyrics = lyrics.lyrics;
+                    onEvent({ type: 'provider', data: { provider: 'qq', results: { lyrics: lyrics.lyrics } } });
+                }
+            }));
+            
+            promises.push(this.kugouLyrics.getLrc(videoId, boiduParams).then(lyrics => {
+                if (lyrics) {
+                    fullResponse.kugouLyricsApiLyrics = lyrics.lyrics;
+                    onEvent({ type: 'provider', data: { provider: 'kugou', results: { lyrics: lyrics.lyrics } } });
+                }
+            }));
+        }
+
+        // Wait for all providers
+        await Promise.all([...promises, lrcLibLyricsPromise]);
+        
+        onEvent({ type: 'done', data: {} });
+
+        return fullResponse;
+    }
 }

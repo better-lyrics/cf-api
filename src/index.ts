@@ -2,6 +2,7 @@ import { fromHono, ApiException } from "chanfana";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { Lyrics } from "./endpoints/Lyrics";
+import { LyricsV2 } from "./endpoints/LyricsV2";
 import { VerifyTurnstile } from "./endpoints/VerifyTurnstile";
 import { DeleteCache } from "./endpoints/DeleteCache";
 import { flushObservability, runWithObservability } from "./observability";
@@ -49,6 +50,7 @@ const openapi = fromHono(app, {
 });
 
 openapi.get("/lyrics", Lyrics);
+openapi.get("/v2/lyrics", LyricsV2);
 openapi.post("/verify-turnstile", VerifyTurnstile);
 openapi.delete("/cache", DeleteCache);
 

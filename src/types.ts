@@ -20,6 +20,12 @@ export const LyricsResponseSchema = z.object({
 
 export type LyricsResponse = z.infer<typeof LyricsResponseSchema>;
 
+export type StreamingEvent = 
+  | { type: 'metadata', data: Partial<LyricsResponse> }
+  | { type: 'provider', data: { provider: string, results: any } }
+  | { type: 'error', data: { message: string } }
+  | { type: 'done', data: Record<string, never> };
+
 export interface Env extends Omit<Cloudflare.Env, "DB"> {
     DB: D1Database | D1DatabaseSession;
     REFETCH_THRESHOLD?: string; // seconds
