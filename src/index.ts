@@ -55,6 +55,30 @@ const openapi = fromHono(app, {
             version: "1.0",
             description: "API for fetching synchronized lyrics from multiple sources.",
         },
+        components: {
+            securitySchemes: {
+                bearerAuth: {
+                    type: "http",
+                    scheme: "bearer",
+                    bearerFormat: "JWT",
+                },
+                apiKeyAuth: {
+                    type: "apiKey",
+                    in: "header",
+                    name: "x-admin-key",
+                },
+                turnstileAuth: {
+                    type: "apiKey",
+                    in: "header",
+                    name: "turnstile-token",
+                },
+            },
+        },
+        security: [
+            {
+                bearerAuth: [],
+            },
+        ],
     },
 });
 

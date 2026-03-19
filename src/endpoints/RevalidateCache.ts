@@ -8,6 +8,11 @@ export class RevalidateCache extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
         summary: "Revalidate Cache",
         tags: ["Cache"],
+        security: [
+            { apiKeyAuth: [] },
+            { turnstileAuth: [] },
+            { bearerAuth: [] }
+        ],
         request: {
             query: z.object({
                 videoId: z.string(),
@@ -17,10 +22,6 @@ export class RevalidateCache extends OpenAPIRoute {
                 duration: z.string().optional(),
                 alwaysFetchMetadata: z.string().optional(),
                 useLrcLib: z.string().optional(),
-            }),
-            headers: z.object({
-                "x-admin-key": z.string().optional(),
-                "turnstile-token": z.string().optional(),
             }),
         },
         responses: {

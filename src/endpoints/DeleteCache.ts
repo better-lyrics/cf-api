@@ -8,13 +8,13 @@ export class DeleteCache extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
         summary: "Delete Cache",
         tags: ["Cache"],
+        security: [
+            { apiKeyAuth: [] },
+            { turnstileAuth: [] }
+        ],
         request: {
             query: z.object({
                 videoId: z.string()
-            }),
-            headers: z.object({
-                "x-admin-key": z.string().optional(),
-                "turnstile-token": z.string().optional(),
             }),
         },
         responses: {

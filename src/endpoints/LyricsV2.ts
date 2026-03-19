@@ -9,6 +9,11 @@ export class LyricsV2 extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
         summary: "Get Lyrics (Streaming v2)",
         tags: ["Lyrics"],
+        security: [
+            {
+                bearerAuth: [],
+            },
+        ],
         request: {
             query: z.object({
                 videoId: z.string(),

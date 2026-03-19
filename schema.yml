@@ -1,156 +1,238 @@
 openapi: 3.0.0
 info:
-    title: Better Lyrics API
-    version: 1.0.0
-    description: |-
-        This API provides lyrics for songs from various sources.
-        It can be queried using a YouTube Video ID, or a combination of song, artist, and album.
+  title: Better Lyrics API
+  version: 1.0.0
+  description: API for fetching synchronized lyrics from multiple sources.
 servers:
-    -   url: https://lyrics.api.dacubeking.com/
+  - url: https://lyrics.api.dacubeking.com/
 components:
-    securitySchemes:
-        bearerAuth:
-            type: http
-            scheme: bearer
-            bearerFormat: JWT
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: x-admin-key
+    turnstileAuth:
+      type: apiKey
+      in: header
+      name: turnstile-token
 security:
-    -   bearerAuth: [ ]
+  - bearerAuth: []
 paths:
-    /:
-        get:
-            summary: Get Lyrics
-            description: Retrieves lyrics for a song.
-            parameters:
-                -   name: artist
-                    in: query
-                    description: The artist of the song. Can be a comma-separated list.
-                    schema:
-                        type: string
-                -   name: song
-                    in: query
-                    description: The name of the song.
-                    schema:
-                        type: string
-                -   name: album
-                    in: query
-                    description: The album of the song.
-                    schema:
-                        type: string
-                -   name: duration
-                    in: query
-                    description: The duration of the song in seconds.
-                    schema:
-                        type: string
-                -   name: videoId
-                    in: query
-                    required: true
-                    description: The YouTube video ID.
-                    schema:
-                        type: string
-                -   name: alwaysFetchMetadata
-                    in: query
-                    description: If true, it will always fetch metadata from the YouTube API.
-                    schema:
-                        type: boolean
+  /lyrics:
+    get:
+      summary: Get Lyrics
+      tags:
+        - Lyrics
+      security:
+        - bearerAuth: []
+      description: Retrieves lyrics for a song.
+      parameters:
+        - name: videoId
+          in: query
+          required: true
+          description: The YouTube video ID.
+          schema:
+            type: string
+        - name: artist
+          in: query
+          description: The artist of the song.
+          schema:
+            type: string
+        - name: song
+          in: query
+          description: The name of the song.
+          schema:
+            type: string
+        - name: album
+          in: query
+          description: The album of the song.
+          schema:
+            type: string
+        - name: duration
+          in: query
+          description: The duration of the song in seconds.
+          schema:
+            type: string
+        - name: alwaysFetchMetadata
+          in: query
+          description: If true, it will always fetch metadata from the YouTube API.
+          schema:
+            type: boolean
+        - name: useLrcLib
+          in: query
+          description: If true, it will use LrcLib.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Successful response with lyrics.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LyricsResponse'
+        '403':
+          description: Unauthorized.
+        '500':
+          description: Internal Error.
+  /v2/lyrics:
+    get:
+      summary: Get Lyrics (Streaming v2)
+      tags:
+        - Lyrics
+      security:
+        - bearerAuth: []
+      description: Retrieves lyrics for a song using server-sent events.
+      parameters:
+        - name: videoId
+          in: query
+          required: true
+          description: The YouTube video ID.
+          schema:
+            type: string
+        - name: artist
+          in: query
+          description: The artist of the song.
+          schema:
+            type: string
+        - name: song
+          in: query
+          description: The name of the song.
+          schema:
+            type: string
+        - name: album
+          in: query
+          description: The album of the song.
+          schema:
+            type: string
+        - name: duration
+          in: query
+          description: The duration of the song in seconds.
+          schema:
+            type: string
+        - name: alwaysFetchMetadata
+          in: query
+          description: If true, it will always fetch metadata from the YouTube API.
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Streaming lyrics events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        '403':
+          description: Unauthorized.
+        '500':
+          description: Internal Error.
+  /verify-turnstile:
+    post:
+      summary: Verify Turnstile Token
+      tags:
+        - Auth
+      security: []
+      description: Verifies a Turnstile token and returns a JWT if valid.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                token:
+                  type: string
+                  description: The Turnstile token from the client.
+      responses:
+        '200':
+          description: Successfully verified Turnstile token and returned a JWT.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jwt:
+                    type: string
+                    description: The JWT to use for subsequent requests.
+        '400':
+          description: Bad Request.
+        '401':
+          description: Unauthorized.
+        '500':
+          description: Internal Server Error.
+  /revalidate:
+    post:
+      summary: Revalidate Cache
+      tags:
+        - Cache
+      security:
+        - apiKeyAuth: []
+        - turnstileAuth: []
+        - bearerAuth: []
+      parameters:
+        - name: videoId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cache Revalidated.
+        '403':
+          description: Unauthorized.
+  /cache:
+    delete:
+      summary: Delete Cache
+      tags:
+        - Cache
+      security:
+        - apiKeyAuth: []
+        - turnstileAuth: []
+      parameters:
+        - name: videoId
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Cache Deleted.
+        '403':
+          description: Unauthorized.
 
-
-            responses:
-                '200':
-                    description: Successful response with lyrics.
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    song:
-                                        type: string
-                                    artist:
-                                        type: string
-                                    album:
-                                        type: string
-                                    duration:
-                                        type: string
-                                    parsedSongAndArtist:
-                                        type: string
-                                        nullable: true
-                                    videoId:
-                                        type: string
-                                    description:
-                                        type: string
-                                        nullable: true
-                                    debugInfo:
-                                        type: object
-                                        nullable: true
-                                    musixmatchWordByWordLyrics:
-                                        type: object
-                                        nullable: true
-                                    musixmatchSyncedLyrics:
-                                        type: object
-                                        nullable: true
-                                    lrclibSyncedLyrics:
-                                        type: object
-                                        nullable: true
-                                    lrclibPlainLyrics:
-                                        type: object
-                                        nullable: true
-                '400':
-                    description: Bad Request. Missing required parameters.
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    message:
-                                        type: string
-                                    song:
-                                        type: string
-                                        nullable: true
-                                    artist:
-                                        type: string
-                                        nullable: true
-                                    album:
-                                        type: string
-                                        nullable: true
-                                    duration:
-                                        type: string
-                                        nullable: true
-                                    parsedSongAndArtist:
-                                        type: string
-                                        nullable: true
-                                    videoId:
-                                        type: string
-                                    description:
-                                        type: string
-                                        nullable: true
-    /verify-turnstile:
-        post:
-            summary: Verify Turnstile Token
-            description: Verifies a Turnstile token and returns a JWT if valid.
-            requestBody:
-                required: true
-                content:
-                    application/json:
-                        schema:
-                            type: object
-                            properties:
-                                token:
-                                    type: string
-                                    description: The Turnstile token from the client.
-            responses:
-                '200':
-                    description: Successfully verified Turnstile token and returned a JWT.
-                    content:
-                        application/json:
-                            schema:
-                                type: object
-                                properties:
-                                    jwt:
-                                        type: string
-                                        description: The JWT to use for subsequent requests.
-                '400':
-                    description: Bad Request. Turnstile token not provided.
-                '401':
-                    description: Unauthorized. Invalid Turnstile token.
-                '500':
-                    description: Internal Server Error.
-
+components:
+  schemas:
+    LyricsResponse:
+      type: object
+      properties:
+        song:
+          type: string
+        artist:
+          type: string
+        album:
+          type: string
+        duration:
+          type: string
+        parsedSongAndArtist:
+          type: string
+          nullable: true
+        videoId:
+          type: string
+        description:
+          type: string
+          nullable: true
+        musixmatchWordByWordLyrics:
+          type: string
+          nullable: true
+        musixmatchSyncedLyrics:
+          type: string
+          nullable: true
+        lrclibSyncedLyrics:
+          type: string
+          nullable: true
+        lrclibPlainLyrics:
+          type: string
+          nullable: true

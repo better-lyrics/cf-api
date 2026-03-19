@@ -7,6 +7,7 @@ export class VerifyTurnstile extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
         summary: "Verify Turnstile Token",
         tags: ["Auth"],
+        security: [],
         request: {
             body: {
                 content: {
