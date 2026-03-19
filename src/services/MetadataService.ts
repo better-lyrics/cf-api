@@ -40,18 +40,27 @@ export class MetadataService {
     constructor(private env: Env) {}
 
     async getMetadata(videoId: string, alwaysFetch: boolean = false, force: boolean = false): Promise<YoutubeMetadata & { action?: string, timestamp?: number } | null> {
+        const cached = await this.getFromCache(videoId);
+
         if (!alwaysFetch && !force) {
-            const cached = await this.getFromCache(videoId);
             if (cached) {
-                return { ...cached, action: 'same', timestamp: cached.last_accessed_at }; // Use last_accessed_at as proxy if last_updated not available, or we can improve getFromCache
+                return { ...cached, action: 'same', timestamp: cached.last_accessed_at };
             }
         }
 
         const fromApi = await this.fetchFromApi(videoId);
         const now = Math.floor(Date.now() / 1000);
         if (fromApi) {
+            let action = 'updated';
+            if (cached && cached.found === fromApi.found && 
+                cached.song === fromApi.song && 
+                JSON.stringify(cached.artists) === JSON.stringify(fromApi.artists) && 
+                cached.album === fromApi.album && 
+                cached.duration === fromApi.duration) {
+                action = 'same';
+            }
             await this.saveToCache(fromApi);
-            return { ...fromApi, action: 'updated', timestamp: now };
+            return { ...fromApi, action: action, timestamp: now };
         } else {
             // Negative cache
             const notFound: YoutubeMetadata = {
@@ -62,8 +71,12 @@ export class MetadataService {
                 duration: null,
                 found: false
             };
+            let action = 'updated';
+            if (cached && cached.found === false) {
+                action = 'same';
+            }
             await this.saveToCache(notFound);
-            return { ...notFound, action: 'updated', timestamp: now };
+            return { ...notFound, action: action, timestamp: now };
         }
     }
 

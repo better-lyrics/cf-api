@@ -55,31 +55,23 @@ const openapi = fromHono(app, {
             version: "1.0",
             description: "API for fetching synchronized lyrics from multiple sources.",
         },
-        components: {
-            securitySchemes: {
-                bearerAuth: {
-                    type: "http",
-                    scheme: "bearer",
-                    bearerFormat: "JWT",
-                },
-                apiKeyAuth: {
-                    type: "apiKey",
-                    in: "header",
-                    name: "x-admin-key",
-                },
-                turnstileAuth: {
-                    type: "apiKey",
-                    in: "header",
-                    name: "turnstile-token",
-                },
-            },
-        },
-        security: [
-            {
-                bearerAuth: [],
-            },
-        ],
     },
+});
+
+openapi.registry.registerComponent("securitySchemes", "bearerAuth", {
+    type: "http",
+    scheme: "bearer",
+    bearerFormat: "JWT",
+});
+openapi.registry.registerComponent("securitySchemes", "apiKeyAuth", {
+    type: "apiKey",
+    in: "header",
+    name: "x-admin-key",
+});
+openapi.registry.registerComponent("securitySchemes", "turnstileAuth", {
+    type: "apiKey",
+    in: "header",
+    name: "turnstile-token",
 });
 
 openapi.get("/lyrics", Lyrics);

@@ -532,6 +532,9 @@ export class Musixmatch {
     async getLrc(videoId: string, artist: string, track: string, album: string | null, lrcLyrics: Promise<any | null | void> | null, tokenPromise: Promise<void>, force: boolean = false):
         Promise<MusixmatchLyrics & { action?: string, timestamp?: number, error?: string } | null> {
 
+        // 1. Check Positive Cache (always check for comparison)
+        const cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
+
         if (!force) {
             // 1. Check Negative Cache
             const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
@@ -543,8 +546,6 @@ export class Musixmatch {
                 return null;
             }
 
-            // 2. Check Positive Cache
-            const cachedData = await this.cacheService.getMusixmatchLyrics("youtube_music", videoId);
             let shouldRefetch = false;
 
             if (cachedData) {
@@ -586,7 +587,23 @@ export class Musixmatch {
         try {
             const result = await this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise);
             if (result) {
-                return { ...result, action: 'updated', timestamp: Math.floor(Date.now() / 1000) };
+                let action = 'updated';
+                let cachedRich: string | null = null;
+                let cachedNormal: string | null = null;
+                if (cachedData) {
+                    for (const lyric of cachedData.lyrics) {
+                        if (lyric.format == "rich_sync") {
+                            cachedRich = lyric.content;
+                        } else if (lyric.format == "normal_sync") {
+                            cachedNormal = lyric.content;
+                        }
+                    }
+                }
+
+                if (cachedRich === result.richSynced && cachedNormal === result.synced) {
+                    action = 'same';
+                }
+                return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
             }
             return null;
         } catch (e: any) {

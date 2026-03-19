@@ -118,6 +118,8 @@ export class BoiduLyricsApi {
     }
 
     async getLrc(videoId: string, providerParameters: BoiduLyricsApiParameters, force: boolean = false): Promise<BoiduLyrics & { action?: string, timestamp?: number, error?: string } | null> {
+        // 1. Check Positive Cache (always check for comparison)
+        const cachedData = await this.getCache("youtube_music", videoId);
 
         if (!force) {
             // 1. Check Negative Cache
@@ -130,8 +132,6 @@ export class BoiduLyricsApi {
                 return null;
             }
 
-            // 2. Check Positive Cache
-            const cachedData = await this.getCache("youtube_music", videoId);
             let shouldRefetch = false;
 
             if (cachedData) {
@@ -168,7 +168,19 @@ export class BoiduLyricsApi {
         try {
             const result = await this.fetchAndSave(videoId, providerParameters);
             if (result) {
-                return { ...result, action: 'updated', timestamp: Math.floor(Date.now() / 1000) };
+                let action = 'updated';
+                let cachedTtml: string | null = null;
+                if (cachedData) {
+                    for (const lyric of cachedData.lyrics) {
+                        if (lyric.format == "ttml") {
+                            cachedTtml = lyric.content;
+                        }
+                    }
+                }
+                if (cachedTtml === result.lyrics) {
+                    action = 'same';
+                }
+                return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
             }
             return null;
         } catch (e: any) {

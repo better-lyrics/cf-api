@@ -84,6 +84,9 @@ export class LrcLib {
     }
 
     async getLyrics(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined, force: boolean = false): Promise<LrcLibLyrics & { action?: string, timestamp?: number, error?: string } | null> {
+        // 1. Check Positive Cache (always check for comparison)
+        const cachedData = await this.cacheService.getLrcLib("youtube_music", videoId);
+
         if (!force) {
             // 1. Check Negative Cache
             const negativeStatus = await this.cacheService.getNegative('lrclib', videoId);
@@ -95,8 +98,6 @@ export class LrcLib {
                 return null;
             }
 
-            // 2. Check Positive Cache
-            const cachedData = await this.cacheService.getLrcLib("youtube_music", videoId);
             let shouldRefetch = false;
 
             if (cachedData) {
@@ -128,7 +129,11 @@ export class LrcLib {
         try {
             const result = await this.fetchAndSave(videoId, artist, song, album, duration);
             if (result) {
-                return { ...result, action: 'updated', timestamp: Math.floor(Date.now() / 1000) };
+                let action = 'updated';
+                if (cachedData && cachedData.synced === result.synced && cachedData.unsynced === result.unsynced) {
+                    action = 'same';
+                }
+                return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
             }
             return null;
         } catch (e: any) {
