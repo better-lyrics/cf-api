@@ -22,6 +22,7 @@ export class RevalidateCache extends OpenAPIRoute {
                 duration: z.string().optional(),
                 alwaysFetchMetadata: z.string().optional(),
                 useLrcLib: z.string().optional(),
+                token: z.string().optional().describe("JWT token (alternative to Authorization header)"),
             }),
         },
         responses: {
@@ -45,6 +46,8 @@ export class RevalidateCache extends OpenAPIRoute {
     async handle(c: AppContext) {
         const env = c.env;
         const request = c.req.raw;
+        const url = new URL(request.url);
+        const queryToken = url.searchParams.get('token');
 
         if (!(env.BYPASS_AUTH === "true")) {
             const adminKeys = env.ADMIN_KEYS ? env.ADMIN_KEYS.split(',') : [];
@@ -65,9 +68,17 @@ export class RevalidateCache extends OpenAPIRoute {
             }
 
             // 3. Check JWT
-            if (!isAuthorized && authHeader && authHeader.startsWith('Bearer ')) {
-                const token = authHeader.substring(7);
-                isAuthorized = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
+            if (!isAuthorized) {
+                let token = '';
+                if (authHeader && authHeader.startsWith('Bearer ')) {
+                    token = authHeader.substring(7);
+                } else if (queryToken) {
+                    token = queryToken;
+                }
+
+                if (token) {
+                    isAuthorized = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
+                }
             }
 
             if (!isAuthorized) {
@@ -93,11 +104,13 @@ export class RevalidateCache extends OpenAPIRoute {
 
             // Clear the Cloudflare Cache for this videoId to ensure next fetch gets fresh data
             const cache = caches.default;
-            const url = new URL(request.url);
-            url.pathname = "/lyrics"; // Clear /lyrics
-            await cache.delete(url.toString());
-            url.pathname = "/v2/lyrics"; // Clear /v2/lyrics
-            await cache.delete(url.toString());
+            const cacheUrl = new URL(request.url);
+            cacheUrl.searchParams.delete('token');
+            
+            cacheUrl.pathname = "/lyrics"; // Clear /lyrics
+            await cache.delete(cacheUrl.toString());
+            cacheUrl.pathname = "/v2/lyrics"; // Clear /v2/lyrics
+            await cache.delete(cacheUrl.toString());
 
             return c.json(result);
         } catch (e: any) {
