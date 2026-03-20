@@ -22,6 +22,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 album: z.string().optional(),
                 duration: z.string().optional(),
                 alwaysFetchMetadata: z.string().optional(),
+                token: z.string().optional().describe("JWT token (alternative to Authorization header)"),
             })
         },
         responses: {
@@ -45,21 +46,35 @@ export class LyricsV2 extends OpenAPIRoute {
     async handle(c: AppContext) {
         const env = c.env;
         const request = c.req.raw;
+        const url = new URL(request.url);
+        const queryToken = url.searchParams.get('token');
 
         if (!(env.BYPASS_AUTH === "true")) {
             const authHeader = request.headers.get('Authorization');
-            if (!authHeader || !authHeader.startsWith('Bearer ')) {
-                return c.json({ error: 'Authorization header missing or malformed' }, 403);
+            let token = '';
+
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                token = authHeader.substring(7);
+            } else if (queryToken) {
+                token = queryToken;
             }
-            const token = authHeader.substring(7);
+
+            if (!token) {
+                return c.json({ error: 'Authorization token missing or malformed' }, 403);
+            }
+
             const isTokenValid = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
             if (!isTokenValid) {
                 return c.json({ error: 'Invalid or expired token' }, 403);
             }
         }
 
+        const cacheUrl = new URL(request.url);
+        cacheUrl.searchParams.delete('token');
+        const cacheKey = cacheUrl.toString();
+
         const cache = caches.default;
-        const cachedResponse = await cache.match(request.url);
+        const cachedResponse = await cache.match(cacheKey);
         
         const { readable, writable } = new TransformStream();
         const writer = writable.getWriter();
@@ -126,7 +141,6 @@ export class LyricsV2 extends OpenAPIRoute {
 
         observe({ usingCachedLyrics: false, v2: true });
         const service = new LyricsService(env);
-        const url = new URL(request.url);
 
         // Background process to fetch and stream
         (async () => {
@@ -143,7 +157,7 @@ export class LyricsV2 extends OpenAPIRoute {
                     } else {
                         cacheResponse.headers.set("Cache-control", "public; max-age=600");
                     }
-                    c.executionCtx.waitUntil(cache.put(request.url, cacheResponse));
+                    c.executionCtx.waitUntil(cache.put(cacheKey, cacheResponse));
                 }
             } catch (e: any) {
                 console.error("Streaming error:", e);

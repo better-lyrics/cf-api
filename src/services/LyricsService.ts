@@ -270,7 +270,7 @@ export class LyricsService {
                 return lyrics;
             });
         
-        const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)]);
+        const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(6000)]);
 
         // Musixmatch
         promises.push(this.musixmatch.getLrc(videoId, currentArtist, currentSong, currentAlbum, lrcLibPromiseRace, tokenPromise)
