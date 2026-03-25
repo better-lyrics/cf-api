@@ -83,7 +83,7 @@ export class LyricsService {
             musixmatchSyncedLyrics: null as any,
             lrclibSyncedLyrics: null as any,
             lrclibPlainLyrics: null as any,
-            goLyricsApiLyrics: null as any,
+            goLyricsApiTtml: null as any,
             qqLyricsApiLyrics: null as any,
             kugouLyricsApiLyrics: null as any
         };
@@ -107,7 +107,7 @@ export class LyricsService {
                     }
                     return lyrics;
                 });
-            
+
             const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)]);
 
             // Musixmatch
@@ -133,7 +133,7 @@ export class LyricsService {
                     duration: duration
                 };
                 boiduPromises.push(this.goLyrics.getLrc(videoId, boiduParams).then(lyrics => {
-                    if (lyrics) response.goLyricsApiLyrics = lyrics.lyrics;
+                    if (lyrics) response.goLyricsApiTtml = lyrics.lyrics;
                 }));
                 boiduPromises.push(this.qqLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                     if (lyrics) response.qqLyricsApiLyrics = lyrics.lyrics;
@@ -146,7 +146,7 @@ export class LyricsService {
             await Promise.all([...boiduPromises, musixmatchLyrics]);
 
             let lrcLibTimeout;
-            if (response.goLyricsApiLyrics || response.qqLyricsApiLyrics || response.kugouLyricsApiLyrics) {
+            if (response.goLyricsApiTtml || response.qqLyricsApiLyrics || response.kugouLyricsApiLyrics) {
                 lrcLibTimeout = 4;
             } else {
                 lrcLibTimeout = 0.5;
@@ -158,14 +158,14 @@ export class LyricsService {
                 'hasLrcLibSynced': isTruthy(response.lrclibSyncedLyrics),
                 'hasMusixmatchSynced': isTruthy(response.musixmatchSyncedLyrics),
                 'hasLrcLibPlain': isTruthy(response.lrclibPlainLyrics),
-                'hasGoLyricsApiLyrics': isTruthy(response.goLyricsApiLyrics),
+                'hasGoLyricsApiTtml': isTruthy(response.goLyricsApiTtml),
                 'hasQqLyricsApiLyrics': isTruthy(response.qqLyricsApiLyrics),
                 'hasKugouLyricsApiLyrics': isTruthy(response.kugouLyricsApiLyrics),
                 'musixMatchError': mxmError
             });
 
-            if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) || 
-                isTruthy(response.goLyricsApiLyrics) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics)) {
+            if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) ||
+                isTruthy(response.goLyricsApiTtml) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics)) {
                 response.song = combo.song;
                 response.artist = combo.artist;
                 response.album = combo.album;
@@ -173,8 +173,8 @@ export class LyricsService {
             }
         }
 
-        const hasAnySynced = isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || 
-                             isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiLyrics) || 
+        const hasAnySynced = isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) ||
+                             isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml) ||
                              isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics);
 
         observe({
@@ -269,7 +269,7 @@ export class LyricsService {
                 }
                 return lyrics;
             });
-        
+
         const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(6000)]);
 
         // Musixmatch
@@ -295,21 +295,21 @@ export class LyricsService {
         // Boidu sources
         if (duration) {
             const boiduParams = { song: currentSong, artist: currentArtist, album: currentAlbum, duration: duration };
-            
+
             promises.push(this.goLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                 if (lyrics) {
                     fullResponse.goLyricsApiLyrics = lyrics.lyrics;
                     onEvent({ type: 'provider', data: { provider: 'golyrics', results: { lyrics: lyrics.lyrics } } });
                 }
             }));
-            
+
             promises.push(this.qqLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                 if (lyrics) {
                     fullResponse.qqLyricsApiLyrics = lyrics.lyrics;
                     onEvent({ type: 'provider', data: { provider: 'qq', results: { lyrics: lyrics.lyrics } } });
                 }
             }));
-            
+
             promises.push(this.kugouLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                 if (lyrics) {
                     fullResponse.kugouLyricsApiLyrics = lyrics.lyrics;
@@ -320,7 +320,7 @@ export class LyricsService {
 
         // Wait for all providers
         await Promise.all([...promises, lrcLibLyricsPromise]);
-        
+
         onEvent({ type: 'done', data: {} });
 
         return fullResponse;
@@ -337,12 +337,12 @@ export class LyricsService {
         const alwaysFetchMetadata = params.get('alwaysFetchMetadata')?.toLowerCase() === 'true';
 
         const status: any = {};
-        
+
         // 1. Metadata
         // Always force metadata fetch for revalidation
         const metadataResult = await this.metadataService.getMetadata(videoId, alwaysFetchMetadata, true);
-        status.metadata = { 
-            action: metadataResult?.action || 'failed', 
+        status.metadata = {
+            action: metadataResult?.action || 'failed',
             timestamp: metadataResult?.timestamp,
             details: metadataResult?.found ? 'Found metadata' : 'Metadata not found'
         };
@@ -366,8 +366,8 @@ export class LyricsService {
 
         // 2. LrcLib
         const lrcLibResult = await this.lrcLib.getLyrics(videoId, combo.artist, combo.song, combo.album, duration, true);
-        status.lrclib = { 
-            action: lrcLibResult?.action || 'failed', 
+        status.lrclib = {
+            action: lrcLibResult?.action || 'failed',
             timestamp: lrcLibResult?.timestamp,
             error: lrcLibResult?.error
         };
@@ -376,8 +376,8 @@ export class LyricsService {
         if (!status.musixmatch) { // If token fetch didn't already fail it
             const lrcLibPromiseRace = Promise.resolve(lrcLibResult);
             const mxmResult = await this.musixmatch.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise as Promise<void>, true);
-            status.musixmatch = { 
-                action: mxmResult?.action || 'failed', 
+            status.musixmatch = {
+                action: mxmResult?.action || 'failed',
                 timestamp: mxmResult?.timestamp,
                 error: mxmResult?.error
             };
@@ -386,13 +386,13 @@ export class LyricsService {
         // 4. Boidu sources
         if (duration) {
             const boiduParams = { song: combo.song, artist: combo.artist, album: combo.album, duration: duration };
-            
+
             const goResult = await this.goLyrics.getLrc(videoId, boiduParams, true);
             status.golyrics = { action: goResult?.action || 'failed', timestamp: goResult?.timestamp, error: goResult?.error };
-            
+
             const qqResult = await this.qqLyrics.getLrc(videoId, boiduParams, true);
             status.qq = { action: qqResult?.action || 'failed', timestamp: qqResult?.timestamp, error: qqResult?.error };
-            
+
             const kugouResult = await this.kugouLyrics.getLrc(videoId, boiduParams, true);
             status.kugou = { action: kugouResult?.action || 'failed', timestamp: kugouResult?.timestamp, error: kugouResult?.error };
         }
