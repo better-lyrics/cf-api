@@ -11,6 +11,7 @@ export interface BoiduLyricsApiParameters {
     artist: string;
     album: string | null;
     duration: string;
+    videoId: string;
 }
 
 const DEFAULT_REFETCH_THRESHOLD = 2 * 86400;
@@ -38,6 +39,7 @@ export class BoiduLyricsApi {
         url.searchParams.append("s", providerParameters.song);
         url.searchParams.append("a", providerParameters.artist);
         url.searchParams.append("d", String(providerParameters.duration));
+        url.searchParams.append("videoId", providerParameters.videoId);
         if (providerParameters.album != null) {
             url.searchParams.append("al", providerParameters.album);
         }

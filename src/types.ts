@@ -13,14 +13,14 @@ export const LyricsResponseSchema = z.object({
   musixmatchSyncedLyrics: z.any().nullable(),
   lrclibSyncedLyrics: z.any().nullable(),
   lrclibPlainLyrics: z.any().nullable(),
-  goLyricsApiLyrics: z.any().nullable(),
+  goLyricsApiTtml: z.any().nullable(),
   qqLyricsApiLyrics: z.any().nullable(),
   kugouLyricsApiLyrics: z.any().nullable(),
 });
 
 export type LyricsResponse = z.infer<typeof LyricsResponseSchema>;
 
-export type StreamingEvent = 
+export type StreamingEvent =
   | { type: 'metadata', data: Partial<LyricsResponse> }
   | { type: 'provider', data: { provider: string, results: any } }
   | { type: 'error', data: { message: string } }

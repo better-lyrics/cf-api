@@ -130,7 +130,8 @@ export class LyricsService {
                     song: combo.song,
                     artist: combo.artist,
                     album: combo.album,
-                    duration: duration
+                    duration: duration,
+                    videoId: videoId
                 };
                 boiduPromises.push(this.goLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                     if (lyrics) response.goLyricsApiTtml = lyrics.lyrics;
@@ -294,7 +295,7 @@ export class LyricsService {
 
         // Boidu sources
         if (duration) {
-            const boiduParams = { song: currentSong, artist: currentArtist, album: currentAlbum, duration: duration };
+            const boiduParams = { song: currentSong, artist: currentArtist, album: currentAlbum, duration: duration , videoId: videoId};
 
             promises.push(this.goLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                 if (lyrics) {
@@ -385,7 +386,7 @@ export class LyricsService {
 
         // 4. Boidu sources
         if (duration) {
-            const boiduParams = { song: combo.song, artist: combo.artist, album: combo.album, duration: duration };
+            const boiduParams = { song: combo.song, artist: combo.artist, album: combo.album, duration: duration, videoId: videoId };
 
             const goResult = await this.goLyrics.getLrc(videoId, boiduParams, true);
             status.golyrics = { action: goResult?.action || 'failed', timestamp: goResult?.timestamp, error: goResult?.error };
