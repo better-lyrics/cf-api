@@ -12,7 +12,7 @@ import { Env } from "./types";
 const app = new Hono<{ Bindings: Env }>();
 
 app.use('*', (c, next) => {
-    const allowedOrigins = c.env.ALLOWED_ORIGINS ? c.env.ALLOWED_ORIGINS.split(',') : ['https://music.youtube.com'];
+    const allowedOrigins = c.env.ALLOWED_ORIGINS ? c.env.ALLOWED_ORIGINS.split(',') : ['https://music.youtube.com', 'https://lrclibup.boidu.dev'];
     return cors({
         origin: (origin) => {
             if (origin && (allowedOrigins.includes(origin) || allowedOrigins.includes('*'))) {
