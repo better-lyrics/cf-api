@@ -79,7 +79,7 @@ export class BoiduLyricsApi {
         return this.cacheService.saveGoLyrics(data);
     }
 
-    private async fetchAndSave(videoId: string, providerParameters: BoiduLyricsApiParameters): Promise<BoiduLyrics | null> {
+    private async fetchAndSave(videoId: string, providerParameters: BoiduLyricsApiParameters, cachedData?: { lyrics: any[], lastUpdatedAt: number } | null): Promise<BoiduLyrics | null> {
         const response = await this._get(providerParameters);
 
         if (response.status !== 200) {
@@ -98,17 +98,38 @@ export class BoiduLyricsApi {
         const ttml = await response.text();
 
         if (ttml) {
-            addAwait(
-                this.saveCache({
-                    source_track_id: videoId,
-                    source_platform: "youtube_music",
-                    lyric_format: "ttml",
-                    lyric_content: ttml,
-                })
-            );
+            let identical = false;
+            if (cachedData) {
+                let cachedTtml: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "ttml") cachedTtml = lyric.content;
+                }
+                if (cachedTtml === ttml) {
+                    identical = true;
+                }
+            }
 
-            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                .bind(this.sourceName, videoId).run());
+            if (identical) {
+                if (this.sourceName === 'qq') {
+                    addAwait(this.cacheService.touchQqLyrics("youtube_music", videoId));
+                } else if (this.sourceName === 'kugou') {
+                    addAwait(this.cacheService.touchKugouLyrics("youtube_music", videoId));
+                } else {
+                    addAwait(this.cacheService.touchGoLyrics("youtube_music", videoId));
+                }
+            } else {
+                addAwait(
+                    this.saveCache({
+                        source_track_id: videoId,
+                        source_platform: "youtube_music",
+                        lyric_format: "ttml",
+                        lyric_content: ttml,
+                    })
+                );
+
+                addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                    .bind(this.sourceName, videoId).run());
+            }
 
         } else {
             addAwait(this.cacheService.saveNegative(this.sourceName, videoId));
@@ -129,7 +150,7 @@ export class BoiduLyricsApi {
             if (negativeStatus.hit) {
                 if (negativeStatus.stale) {
                     // SWR: Return null, but fetch in background
-                    addAwait(this.fetchAndSave(videoId, providerParameters));
+                    addAwait(this.fetchAndSave(videoId, providerParameters, cachedData));
                 }
                 return null;
             }
@@ -150,7 +171,7 @@ export class BoiduLyricsApi {
 
                 if (shouldRefetch) {
                     // SWR: Use cached data, but fetch in background
-                    addAwait(this.fetchAndSave(videoId, providerParameters));
+                    addAwait(this.fetchAndSave(videoId, providerParameters, cachedData));
                 }
 
                 // Return cached data
@@ -168,7 +189,7 @@ export class BoiduLyricsApi {
 
         // 3. No Cache, Fetch Synchronously
         try {
-            const result = await this.fetchAndSave(videoId, providerParameters);
+            const result = await this.fetchAndSave(videoId, providerParameters, cachedData);
             if (result) {
                 let action = 'updated';
                 let cachedTtml: string | null = null;

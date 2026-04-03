@@ -160,6 +160,18 @@ export class CacheService {
         }
     }
 
+    async touchMusixmatch(source_platform: SourcePlatform, source_track_id: string): Promise<void> {
+        const now = Math.floor(Date.now() / 1000);
+        await this.env.DB.prepare(`
+            UPDATE tracks 
+            SET last_updated_at = ?1, last_accessed_at = ?1
+            WHERE id IN (
+                SELECT track_id FROM track_mappings 
+                WHERE source_platform = ?2 AND source_track_id = ?3
+            )
+        `).bind(now, source_platform, source_track_id).run();
+    }
+
     private async _getBoiduLyrics(tableName: string, source_platform: SourcePlatform, source_track_id: string): Promise<{ lyrics: Lyric[], lastUpdatedAt: number } | null> {
         // Warning: tableName must be sanitized. Since we only pass hardcoded table names, it's safe.
         const stmt = this.env.DB.prepare(`
@@ -205,12 +217,25 @@ export class CacheService {
         }
     }
 
+    async touchBoiduLyrics(tableName: string, source_platform: SourcePlatform, source_track_id: string): Promise<void> {
+        const now = Math.floor(Date.now() / 1000);
+        await this.env.DB.prepare(`
+            UPDATE ${tableName} 
+            SET last_updated_at = ?1, last_accessed_at = ?1 
+            WHERE video_id = ?2 AND source_platform = ?3
+        `).bind(now, source_track_id, source_platform).run();
+    }
+
     async getGoLyrics(source_platform: SourcePlatform, source_track_id: string) {
         return this._getBoiduLyrics('go_lyrics_cache', source_platform, source_track_id);
     }
 
     async saveGoLyrics(data: SaveLyricsData) {
         return this._saveBoiduLyrics('go_lyrics_cache', data, 'go');
+    }
+
+    async touchGoLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this.touchBoiduLyrics('go_lyrics_cache', source_platform, source_track_id);
     }
 
     async getQqLyrics(source_platform: SourcePlatform, source_track_id: string) {
@@ -221,12 +246,20 @@ export class CacheService {
         return this._saveBoiduLyrics('qq_lyrics_cache', data, 'qq');
     }
 
+    async touchQqLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this.touchBoiduLyrics('qq_lyrics_cache', source_platform, source_track_id);
+    }
+
     async getKugouLyrics(source_platform: SourcePlatform, source_track_id: string) {
         return this._getBoiduLyrics('kugou_lyrics_cache', source_platform, source_track_id);
     }
 
     async saveKugouLyrics(data: SaveLyricsData) {
         return this._saveBoiduLyrics('kugou_lyrics_cache', data, 'kugou');
+    }
+
+    async touchKugouLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this.touchBoiduLyrics('kugou_lyrics_cache', source_platform, source_track_id);
     }
 
     async getLrcLib(source_platform: SourcePlatform, source_track_id: string): Promise<{ synced: string | null, unsynced: string | null, lastUpdatedAt: number } | null> {
@@ -277,6 +310,15 @@ export class CacheService {
             console.error("Save LrcLib failed", e);
             return false;
         }
+    }
+
+    async touchLrcLib(source_platform: SourcePlatform, source_track_id: string): Promise<void> {
+        const now = Math.floor(Date.now() / 1000);
+        await this.env.DB.prepare(`
+            UPDATE lrclib_cache 
+            SET last_updated_at = ?1, last_accessed_at = ?1 
+            WHERE video_id = ?2 AND source_platform = ?3
+        `).bind(now, source_track_id, source_platform).run();
     }
 
     async getNegative(source_platform: SourcePlatform, source_track_id: string): Promise<{ hit: boolean, stale: boolean }> {

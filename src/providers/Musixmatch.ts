@@ -440,7 +440,8 @@ export class Musixmatch {
         track: string,
         album: string | null,
         lrcLyrics: Promise<any | null | void> | null,
-        tokenPromise: Promise<void>
+        tokenPromise: Promise<void>,
+        cachedData?: { lyrics: any[], lastUpdatedAt: number } | null
     ): Promise<MusixmatchLyrics | null> {
         await tokenPromise;
         observe({ 'musixMatchHasValidToken': token !== null });
@@ -495,31 +496,48 @@ export class Musixmatch {
         }
 
         if (result) {
-            // Clear negative cache if it existed
-            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                .bind('youtube_music', videoId).run());
-
-            if (result.richSynced) {
-                addAwait(
-                    this.cacheService.saveMusixmatchLyrics({
-                        musixmatch_track_id: Number(trackId),
-                        source_platform: "youtube_music",
-                        source_track_id: videoId,
-                        lyric_format: "rich_sync",
-                        lyric_content: result.richSynced,
-                    })
-                );
+            let identical = false;
+            if (cachedData) {
+                let cachedRich: string | null = null;
+                let cachedNormal: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "rich_sync") cachedRich = lyric.content;
+                    else if (lyric.format == "normal_sync") cachedNormal = lyric.content;
+                }
+                if (cachedRich === result.richSynced && cachedNormal === result.synced) {
+                    identical = true;
+                }
             }
-            if (result.synced) {
-                addAwait(
-                    this.cacheService.saveMusixmatchLyrics({
-                        musixmatch_track_id: Number(trackId),
-                        source_platform: "youtube_music",
-                        source_track_id: videoId,
-                        lyric_format: 'normal_sync',
-                        lyric_content: result.synced,
-                    })
-                );
+
+            if (identical) {
+                addAwait(this.cacheService.touchMusixmatch('youtube_music', videoId));
+            } else {
+                // Clear negative cache if it existed
+                addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                    .bind('youtube_music', videoId).run());
+
+                if (result.richSynced) {
+                    addAwait(
+                        this.cacheService.saveMusixmatchLyrics({
+                            musixmatch_track_id: Number(trackId),
+                            source_platform: "youtube_music",
+                            source_track_id: videoId,
+                            lyric_format: "rich_sync",
+                            lyric_content: result.richSynced,
+                        })
+                    );
+                }
+                if (result.synced) {
+                    addAwait(
+                        this.cacheService.saveMusixmatchLyrics({
+                            musixmatch_track_id: Number(trackId),
+                            source_platform: "youtube_music",
+                            source_track_id: videoId,
+                            lyric_format: 'normal_sync',
+                            lyric_content: result.synced,
+                        })
+                    );
+                }
             }
         } else {
              addAwait(this.cacheService.saveNegative('youtube_music', videoId));
@@ -541,7 +559,7 @@ export class Musixmatch {
             if (negativeStatus.hit) {
                 if (negativeStatus.stale) {
                     // SWR: Fetch in background
-                    addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
+                    addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise, cachedData));
                 }
                 return null;
             }
@@ -563,7 +581,7 @@ export class Musixmatch {
 
                 if (shouldRefetch) {
                      // SWR: Use cached data, but fetch in background
-                     addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise));
+                     addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise, cachedData));
                 }
 
                 let richSynced: string | null = null;
@@ -585,7 +603,7 @@ export class Musixmatch {
 
         // 3. Fetch from API
         try {
-            const result = await this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise);
+            const result = await this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise, cachedData);
             if (result) {
                 let action = 'updated';
                 let cachedRich: string | null = null;

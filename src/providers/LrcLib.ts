@@ -29,7 +29,7 @@ export class LrcLib {
         this.cacheService = new CacheService(env);
     }
 
-    private async fetchAndSave(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined): Promise<LrcLibLyrics | null> {
+    private async fetchAndSave(videoId: string, artist: string, song: string, album: string | null, duration: string | null | undefined, cachedData?: { synced: string | null, unsynced: string | null, lastUpdatedAt: number } | null): Promise<LrcLibLyrics | null> {
         const fetchUrl = new URL(LRCLIB_API);
         fetchUrl.searchParams.append('artist_name', artist);
         fetchUrl.searchParams.append('track_name', song);
@@ -60,17 +60,28 @@ export class LrcLib {
 
             const json = await res.json() as LrcLibResponse;
 
-            // If we found lyrics, ensure negative cache is cleared
-            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                .bind('lrclib', videoId).run());
+            let identical = false;
+            if (cachedData) {
+                if (cachedData.synced === (json.syncedLyrics || null) && cachedData.unsynced === (json.plainLyrics || null)) {
+                    identical = true;
+                }
+            }
 
-            if (json.syncedLyrics || json.plainLyrics) {
-                addAwait(this.cacheService.saveLrcLib({
-                    source_platform: 'youtube_music',
-                    source_track_id: videoId,
-                    lyric_content: JSON.stringify({ synced: json.syncedLyrics, unsynced: json.plainLyrics }),
-                    lyric_format: 'normal_sync'
-                }));
+            if (identical) {
+                addAwait(this.cacheService.touchLrcLib('youtube_music', videoId));
+            } else {
+                // If we found lyrics, ensure negative cache is cleared
+                addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                    .bind('lrclib', videoId).run());
+
+                if (json.syncedLyrics || json.plainLyrics) {
+                    addAwait(this.cacheService.saveLrcLib({
+                        source_platform: 'youtube_music',
+                        source_track_id: videoId,
+                        lyric_content: JSON.stringify({ synced: json.syncedLyrics, unsynced: json.plainLyrics }),
+                        lyric_format: 'normal_sync'
+                    }));
+                }
             }
 
             return {
@@ -93,7 +104,7 @@ export class LrcLib {
             if (negativeStatus.hit) {
                 if (negativeStatus.stale) {
                     // SWR: Return null, but fetch in background
-                    addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
+                    addAwait(this.fetchAndSave(videoId, artist, song, album, duration, cachedData));
                 }
                 return null;
             }
@@ -113,7 +124,7 @@ export class LrcLib {
                 }
 
                 if (shouldRefetch) {
-                    addAwait(this.fetchAndSave(videoId, artist, song, album, duration));
+                    addAwait(this.fetchAndSave(videoId, artist, song, album, duration, cachedData));
                 }
 
                 return {
@@ -127,7 +138,7 @@ export class LrcLib {
 
         // 3. Fetch Synchronously
         try {
-            const result = await this.fetchAndSave(videoId, artist, song, album, duration);
+            const result = await this.fetchAndSave(videoId, artist, song, album, duration, cachedData);
             if (result) {
                 let action = 'updated';
                 if (cachedData && cachedData.synced === result.synced && cachedData.unsynced === result.unsynced) {
