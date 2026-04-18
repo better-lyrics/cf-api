@@ -25,6 +25,7 @@ export class LyricsV2 extends OpenAPIRoute {
                             album: z.string().optional(),
                             duration: z.string().optional(),
                             alwaysFetchMetadata: z.string().optional(),
+                            isrc: z.string().optional().describe("ISRC code (for Binimum provider)"),
                             token: z.string().describe("JWT token"),
                         })
                     }
@@ -68,7 +69,7 @@ export class LyricsV2 extends OpenAPIRoute {
         }
 
         const params = new URLSearchParams();
-        for (const field of ['videoId', 'song', 'artist', 'album', 'duration', 'alwaysFetchMetadata']) {
+        for (const field of ['videoId', 'song', 'artist', 'album', 'duration', 'alwaysFetchMetadata', 'isrc']) {
             const value = form[field];
             if (typeof value === 'string') params.append(field, value);
         }
@@ -125,7 +126,10 @@ export class LyricsV2 extends OpenAPIRoute {
                     if (result.kugouLyricsApiLyrics) {
                         await sendEvent({ type: 'provider', data: { provider: 'kugou', results: { lyrics: result.kugouLyricsApiLyrics } }});
                     }
-                    
+                    if (result.binimumLyrics) {
+                        await sendEvent({ type: 'provider', data: { provider: 'binimum', results: { lyrics: result.binimumLyrics, timingType: result.binimumTimingType ?? null } }});
+                    }
+
                     await sendEvent({ type: 'done', data: {} });
                 } catch (e) {
                     console.error("Error streaming cached response:", e);
@@ -156,7 +160,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 if (fullResult) {
                     // Cache the full result for future requests (v1 or v2)
                     const cacheResponse = Response.json(fullResult);
-                    if (fullResult.musixmatchSyncedLyrics || fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics) {
+                    if (fullResult.musixmatchSyncedLyrics || fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics || fullResult.binimumLyrics) {
                         cacheResponse.headers.set('Cache-control', 'public; max-age=1080');
                     } else {
                         cacheResponse.headers.set("Cache-control", "public; max-age=600");

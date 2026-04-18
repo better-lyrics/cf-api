@@ -2,6 +2,7 @@ import { Env } from '../types';
 import { MetadataService } from './MetadataService';
 import { Musixmatch } from '../providers/Musixmatch';
 import { BoiduLyricsApi } from '../providers/BoiduLyricsApi';
+import { Binimum } from '../providers/Binimum';
 import { LrcLib } from '../providers/LrcLib';
 import { observe } from '../observability';
 import { isTruthy, sleep } from '../utils';
@@ -12,6 +13,7 @@ export class LyricsService {
     private goLyrics: BoiduLyricsApi;
     private qqLyrics: BoiduLyricsApi;
     private kugouLyrics: BoiduLyricsApi;
+    private binimum: Binimum;
     private lrcLib: LrcLib;
     private env: Env;
 
@@ -22,6 +24,7 @@ export class LyricsService {
         this.goLyrics = new BoiduLyricsApi(env, 'golyrics', 'https://lyrics-api.boidu.dev/getLyrics');
         this.qqLyrics = new BoiduLyricsApi(env, 'qq', 'https://lyrics-api.boidu.dev/qq/getLyrics');
         this.kugouLyrics = new BoiduLyricsApi(env, 'kugou', 'https://lyrics-api.boidu.dev/kugou/getLyrics');
+        this.binimum = new Binimum(env);
         this.lrcLib = new LrcLib(env);
     }
 
@@ -85,8 +88,12 @@ export class LyricsService {
             lrclibPlainLyrics: null as any,
             goLyricsApiTtml: null as any,
             qqLyricsApiLyrics: null as any,
-            kugouLyricsApiLyrics: null as any
+            kugouLyricsApiLyrics: null as any,
+            binimumTtml: null as any,
+            binimumTimingType: null as 'syllable' | 'line' | null,
         };
+
+        const isrc = params.get('isrc');
 
         const artistAlbumSongCombos: { artist: string, song: string, album: string | null }[] = [
             {
@@ -142,6 +149,12 @@ export class LyricsService {
                 boiduPromises.push(this.kugouLyrics.getLrc(videoId, boiduParams).then(lyrics => {
                     if (lyrics) response.kugouLyricsApiLyrics = lyrics.lyrics;
                 }));
+                boiduPromises.push(this.binimum.getLrc(videoId, { ...boiduParams, isrc }).then(lyrics => {
+                    if (lyrics) {
+                        response.binimumTtml = lyrics.lyrics;
+                        response.binimumTimingType = lyrics.timingType;
+                    }
+                }));
             }
 
             await Promise.all([...boiduPromises, musixmatchLyrics]);
@@ -162,11 +175,13 @@ export class LyricsService {
                 'hasGoLyricsApiTtml': isTruthy(response.goLyricsApiTtml),
                 'hasQqLyricsApiLyrics': isTruthy(response.qqLyricsApiLyrics),
                 'hasKugouLyricsApiLyrics': isTruthy(response.kugouLyricsApiLyrics),
+                'hasBinimumTtml': isTruthy(response.binimumTtml),
                 'musixMatchError': mxmError
             });
 
             if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) ||
-                isTruthy(response.goLyricsApiTtml) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics)) {
+                isTruthy(response.goLyricsApiTtml) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics) ||
+                isTruthy(response.binimumTtml)) {
                 response.song = combo.song;
                 response.artist = combo.artist;
                 response.album = combo.album;
@@ -176,7 +191,8 @@ export class LyricsService {
 
         const hasAnySynced = isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) ||
                              isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml) ||
-                             isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics);
+                             isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics) ||
+                             isTruthy(response.binimumTtml);
 
         observe({
             combos: artistAlbumSongCombos,
@@ -244,12 +260,15 @@ export class LyricsService {
             lrclibPlainLyrics: null,
             goLyricsApiLyrics: null,
             qqLyricsApiLyrics: null,
-            kugouLyricsApiLyrics: null
+            kugouLyricsApiLyrics: null,
+            binimumLyrics: null,
+            binimumTimingType: null,
         };
 
         const currentArtist = artists.join(', ');
         const currentAlbum = album || null;
         const currentSong = song;
+        const isrc = params.get('isrc');
 
         // Providers
         const promises: Promise<void>[] = [];
@@ -315,6 +334,14 @@ export class LyricsService {
                 if (lyrics) {
                     fullResponse.kugouLyricsApiLyrics = lyrics.lyrics;
                     onEvent({ type: 'provider', data: { provider: 'kugou', results: { lyrics: lyrics.lyrics } } });
+                }
+            }));
+
+            promises.push(this.binimum.getLrc(videoId, { ...boiduParams, isrc }).then(lyrics => {
+                if (lyrics && lyrics.lyrics) {
+                    fullResponse.binimumLyrics = lyrics.lyrics;
+                    fullResponse.binimumTimingType = lyrics.timingType;
+                    onEvent({ type: 'provider', data: { provider: 'binimum', results: { lyrics: lyrics.lyrics, timingType: lyrics.timingType } } });
                 }
             }));
         }
@@ -396,6 +423,10 @@ export class LyricsService {
 
             const kugouResult = await this.kugouLyrics.getLrc(videoId, boiduParams, true);
             status.kugou = { action: kugouResult?.action || 'failed', timestamp: kugouResult?.timestamp, error: kugouResult?.error };
+
+            const isrc = params.get('isrc');
+            const binimumResult = await this.binimum.getLrc(videoId, { ...boiduParams, isrc }, true);
+            status.binimum = { action: binimumResult?.action || 'failed', timestamp: binimumResult?.timestamp, error: binimumResult?.error };
         }
 
         return { success: true, videoId, status };
