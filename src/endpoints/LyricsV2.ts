@@ -15,15 +15,21 @@ export class LyricsV2 extends OpenAPIRoute {
             },
         ],
         request: {
-            query: z.object({
-                videoId: z.string(),
-                song: z.string().optional(),
-                artist: z.string().optional(),
-                album: z.string().optional(),
-                duration: z.string().optional(),
-                alwaysFetchMetadata: z.string().optional(),
-                token: z.string().optional().describe("JWT token (alternative to Authorization header)"),
-            })
+            body: {
+                content: {
+                    "application/x-www-form-urlencoded": {
+                        schema: z.object({
+                            videoId: z.string(),
+                            song: z.string().optional(),
+                            artist: z.string().optional(),
+                            album: z.string().optional(),
+                            duration: z.string().optional(),
+                            alwaysFetchMetadata: z.string().optional(),
+                            token: z.string().describe("JWT token"),
+                        })
+                    }
+                }
+            }
         },
         responses: {
             "200": {
@@ -46,19 +52,11 @@ export class LyricsV2 extends OpenAPIRoute {
     async handle(c: AppContext) {
         const env = c.env;
         const request = c.req.raw;
-        const url = new URL(request.url);
-        const queryToken = url.searchParams.get('token');
+
+        const form = await c.req.parseBody();
+        const token = typeof form.token === 'string' ? form.token : '';
 
         if (!(env.BYPASS_AUTH === "true")) {
-            const authHeader = request.headers.get('Authorization');
-            let token = '';
-
-            if (authHeader && authHeader.startsWith('Bearer ')) {
-                token = authHeader.substring(7);
-            } else if (queryToken) {
-                token = queryToken;
-            }
-
             if (!token) {
                 return c.json({ error: 'Authorization token missing or malformed' }, 403);
             }
@@ -69,8 +67,14 @@ export class LyricsV2 extends OpenAPIRoute {
             }
         }
 
+        const params = new URLSearchParams();
+        for (const field of ['videoId', 'song', 'artist', 'album', 'duration', 'alwaysFetchMetadata']) {
+            const value = form[field];
+            if (typeof value === 'string') params.append(field, value);
+        }
+
         const cacheUrl = new URL(request.url);
-        cacheUrl.searchParams.delete('token');
+        cacheUrl.search = params.toString();
         const cacheKey = cacheUrl.toString();
 
         const cache = caches.default;
@@ -145,7 +149,7 @@ export class LyricsV2 extends OpenAPIRoute {
         // Background process to fetch and stream
         (async () => {
             try {
-                const fullResult = await service.getLyricsStreaming(url.searchParams, async (event) => {
+                const fullResult = await service.getLyricsStreaming(params, async (event) => {
                     await sendEvent(event);
                 });
 

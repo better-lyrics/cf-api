@@ -14,12 +14,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.use('*', (c, next) => {
     const allowedOrigins = c.env.ALLOWED_ORIGINS ? c.env.ALLOWED_ORIGINS.split(',') : ['https://music.youtube.com', 'https://lrclibup.boidu.dev'];
     return cors({
-        origin: (origin) => {
-            if (origin && (allowedOrigins.includes(origin) || allowedOrigins.includes('*'))) {
-                return origin;
-            }
-            return allowedOrigins[0];
-        },
+        origin: allowedOrigins,
         allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
         allowHeaders: ['Authorization', 'Content-Type', 'x-admin-key', 'turnstile-token'],
         exposeHeaders: ['Content-Length'],
@@ -75,7 +70,7 @@ openapi.registry.registerComponent("securitySchemes", "turnstileAuth", {
 });
 
 openapi.get("/lyrics", Lyrics);
-openapi.get("/v2/lyrics", LyricsV2);
+openapi.post("/v2/lyrics", LyricsV2);
 openapi.post("/verify-turnstile", VerifyTurnstile);
 openapi.post("/revalidate", RevalidateCache);
 openapi.delete("/cache", DeleteCache);
