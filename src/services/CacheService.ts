@@ -3,7 +3,7 @@ import pako from 'pako';
 import { addAwait, observe } from '../observability';
 
 export type LyricType = 'rich_sync' | 'normal_sync' | 'ttml';
-export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib' | 'qq' | 'kugou';
+export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib' | 'qq' | 'kugou' | 'binimum';
 
 export interface Lyric {
     format: LyricType;
@@ -262,6 +262,54 @@ export class CacheService {
         return this.touchBoiduLyrics('kugou_lyrics_cache', source_platform, source_track_id);
     }
 
+    async getBinimumLyrics(source_platform: SourcePlatform, source_track_id: string): Promise<{ lyrics: Lyric[], lastUpdatedAt: number, timingType: 'syllable' | 'line' | null } | null> {
+        const stmt = this.env.DB.prepare(`
+            SELECT r2_key, timing_type, last_accessed_at, last_updated_at FROM binimum_lyrics_cache WHERE video_id = ?1 AND source_platform = ?2
+        `);
+        const result = await stmt.bind(source_track_id, source_platform).first<{ r2_key: string, timing_type: 'syllable' | 'line' | null, last_accessed_at: number, last_updated_at: number }>();
+
+        if (!result) return null;
+
+        const now = Math.floor(Date.now() / 1000);
+        if (now - result.last_accessed_at > 86400) {
+            addAwait(
+                this.env.DB.prepare("UPDATE binimum_lyrics_cache SET last_accessed_at = ?1 WHERE video_id = ?2 AND source_platform = ?3")
+                    .bind(now, source_track_id, source_platform).run()
+            );
+        }
+
+        const lastUpdatedAt = result.last_updated_at || result.last_accessed_at;
+
+        const object = await this.env.LYRICS_BUCKET.get(result.r2_key);
+        if (!object) return null;
+        const compressed = await object.arrayBuffer();
+        const content = pako.inflate(compressed, { to: 'string' });
+
+        return { lyrics: [{ format: 'ttml', content }], lastUpdatedAt, timingType: result.timing_type };
+    }
+
+    async saveBinimumLyrics(data: SaveLyricsData, timingType: 'syllable' | 'line' | null): Promise<boolean> {
+        try {
+            const compressed = pako.deflate(data.lyric_content);
+            const r2Key = `${data.source_track_id}/binimum_ttml.gz`;
+            await this.env.LYRICS_BUCKET.put(r2Key, compressed);
+
+            const now = Math.floor(Date.now() / 1000);
+            await this.env.DB.prepare(`
+                INSERT INTO binimum_lyrics_cache (video_id, source_platform, r2_key, timing_type, last_accessed_at, last_updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?5)
+                ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, timing_type = ?4, last_accessed_at = ?5, last_updated_at = ?5
+            `).bind(data.source_track_id, data.source_platform, r2Key, timingType, now).run();
+            return true;
+        } catch (_e) {
+            return false;
+        }
+    }
+
+    async touchBinimumLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this.touchBoiduLyrics('binimum_lyrics_cache', source_platform, source_track_id);
+    }
+
     async getLrcLib(source_platform: SourcePlatform, source_track_id: string): Promise<{ synced: string | null, unsynced: string | null, lastUpdatedAt: number } | null> {
         const stmt = this.env.DB.prepare(`
             SELECT r2_key, last_accessed_at, last_updated_at FROM lrclib_cache WHERE video_id = ?1 AND source_platform = ?2
@@ -373,7 +421,7 @@ export class CacheService {
          }
 
          // 2. Delete Boidu sources and cleanup R2
-         const boiduSources = ['go_lyrics_cache', 'qq_lyrics_cache', 'kugou_lyrics_cache'];
+         const boiduSources = ['go_lyrics_cache', 'qq_lyrics_cache', 'kugou_lyrics_cache', 'binimum_lyrics_cache'];
          for (const table of boiduSources) {
              const row = await this.env.DB.prepare(`SELECT r2_key FROM ${table} WHERE video_id = ?1`).bind(videoId).first<{r2_key: string}>();
              if (row) {
