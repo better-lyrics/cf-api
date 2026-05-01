@@ -41,9 +41,30 @@ export class DeleteCache extends OpenAPIRoute {
             const apiKey = request.headers.get('x-admin-key');
             const turnstileToken = null; // request.headers.get("turnstile-token");
 
-            if ((!apiKey || !adminKeys.includes(apiKey)) &&
-                (!turnstileToken || !verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY))) {
-                return c.json({ error: 'Unauthorized' }, 403);
+            let isAuthorized = false;
+            const failures: { method: string; reason: string }[] = [];
+
+            if (apiKey) {
+                if (adminKeys.includes(apiKey)) {
+                    isAuthorized = true;
+                } else {
+                    failures.push({ method: 'admin_key', reason: 'invalid_admin_key' });
+                }
+            }
+
+            if (!isAuthorized && turnstileToken) {
+                if (await verifyTurnstileToken(turnstileToken, c.env.TURNSTILE_SECRET_KEY)) {
+                    isAuthorized = true;
+                } else {
+                    failures.push({ method: 'turnstile', reason: 'invalid_turnstile_token' });
+                }
+            }
+
+            if (!isAuthorized) {
+                if (failures.length === 0) {
+                    return c.json({ error: 'Unauthorized', reason: 'no_credentials_provided' }, 403);
+                }
+                return c.json({ error: 'Unauthorized', failures }, 403);
             }
         }
 

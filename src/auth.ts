@@ -85,18 +85,22 @@ export async function createJwt(secretKey: string, ipAddress: string): Promise<s
     return `${encodedHeader}.${encodedPayload}.${encodedSignature}`;
 }
 
+export type JwtVerificationResult =
+    | { valid: true }
+    | { valid: false; reason: 'malformed' | 'expired' | 'ip_mismatch' | 'bad_signature' | 'error' };
+
 /**
  * Verifies an incoming JWT's signature, expiration, and IP address claim.
  * @param token The JWT from the Authorization header.
  * @param secretKey The secret key to verify the signature with.
  * @param requestIp The IP address of the incoming request.
- * @returns True if the token is valid, false otherwise.
+ * @returns A result object indicating validity and, on failure, the reason.
  */
-export async function verifyJwt(token: string, secretKey: string, requestIp: string): Promise<boolean> {
+export async function verifyJwt(token: string, secretKey: string, requestIp: string): Promise<JwtVerificationResult> {
     try {
         const [encodedHeader, encodedPayload, encodedSignature] = token.split('.');
         if (!encodedHeader || !encodedPayload || !encodedSignature) {
-            return false;
+            return { valid: false, reason: 'malformed' };
         }
 
         const payload = JSON.parse(base64UrlDecode(encodedPayload));
@@ -104,13 +108,13 @@ export async function verifyJwt(token: string, secretKey: string, requestIp: str
         // 1. Check if the token has expired
         if (payload.exp && Date.now() / 1000 > payload.exp) {
             observe({ jwtLog: 'JWT has expired' });
-            return false;
+            return { valid: false, reason: 'expired' };
         }
 
         // 2. Check if the IP address matches the one in the token
         if (payload.ip !== requestIp) {
             observe({ jwtLog: `JWT IP mismatch. Token IP: ${payload.ip}, Request IP: ${requestIp}` });
-            return false;
+            return { valid: false, reason: 'ip_mismatch' };
         }
 
         // 3. Verify the signature
@@ -124,15 +128,34 @@ export async function verifyJwt(token: string, secretKey: string, requestIp: str
 
         const signature = Uint8Array.from(base64UrlDecode(encodedSignature), c => c.charCodeAt(0));
 
-        return await crypto.subtle.verify(
+        const signatureValid = await crypto.subtle.verify(
             'HMAC',
             key,
             signature,
             new TextEncoder().encode(`${encodedHeader}.${encodedPayload}`)
         );
+
+        if (!signatureValid) {
+            observe({ jwtLog: 'JWT signature verification failed' });
+            return { valid: false, reason: 'bad_signature' };
+        }
+
+        return { valid: true };
     } catch (e) {
         console.error("JWT verification error:", e);
-        return false;
+        return { valid: false, reason: 'error' };
     }
+}
+
+const JWT_REASON_MESSAGES: Record<Exclude<JwtVerificationResult, { valid: true }>['reason'], string> = {
+    malformed: 'Authorization token is malformed',
+    expired: 'Authorization token has expired',
+    ip_mismatch: 'Authorization token IP does not match request IP',
+    bad_signature: 'Authorization token signature verification failed',
+    error: 'Authorization token could not be verified',
+};
+
+export function jwtFailureMessage(reason: Exclude<JwtVerificationResult, { valid: true }>['reason']): string {
+    return JWT_REASON_MESSAGES[reason];
 }
 

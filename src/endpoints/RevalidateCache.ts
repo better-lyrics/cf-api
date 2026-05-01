@@ -2,7 +2,7 @@ import { OpenAPIRoute, OpenAPIRouteSchema } from "chanfana";
 import { z } from "zod";
 import { LyricsService } from "../services/LyricsService";
 import { AppContext } from "../types";
-import { verifyTurnstileToken, verifyJwt } from "../auth";
+import { verifyTurnstileToken, verifyJwt, jwtFailureMessage } from "../auth";
 
 export class RevalidateCache extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
@@ -56,15 +56,24 @@ export class RevalidateCache extends OpenAPIRoute {
             const authHeader = request.headers.get('Authorization');
 
             let isAuthorized = false;
+            const failures: { method: string; reason: string; message?: string }[] = [];
 
             // 1. Check Admin Key
-            if ((apiKey && adminKeys.includes(apiKey)) || env.BYPASS_AUTH === "true") {
-                isAuthorized = true;
+            if (apiKey) {
+                if (adminKeys.includes(apiKey)) {
+                    isAuthorized = true;
+                } else {
+                    failures.push({ method: 'admin_key', reason: 'invalid_admin_key' });
+                }
             }
 
             // 2. Check Turnstile Token
             if (!isAuthorized && turnstileToken) {
-                isAuthorized = await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET_KEY);
+                if (await verifyTurnstileToken(turnstileToken, env.TURNSTILE_SECRET_KEY)) {
+                    isAuthorized = true;
+                } else {
+                    failures.push({ method: 'turnstile', reason: 'invalid_turnstile_token' });
+                }
             }
 
             // 3. Check JWT
@@ -77,12 +86,20 @@ export class RevalidateCache extends OpenAPIRoute {
                 }
 
                 if (token) {
-                    isAuthorized = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
+                    const result = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
+                    if (result.valid) {
+                        isAuthorized = true;
+                    } else {
+                        failures.push({ method: 'jwt', reason: result.reason, message: jwtFailureMessage(result.reason) });
+                    }
                 }
             }
 
             if (!isAuthorized) {
-                return c.json({ error: 'Unauthorized' }, 403);
+                if (failures.length === 0) {
+                    return c.json({ error: 'Unauthorized', reason: 'no_credentials_provided' }, 403);
+                }
+                return c.json({ error: 'Unauthorized', failures }, 403);
             }
         }
 

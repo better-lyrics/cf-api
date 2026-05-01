@@ -3,7 +3,7 @@ import { z } from "zod";
 import { LyricsService } from "../services/LyricsService";
 import { AppContext, StreamingEvent } from "../types";
 import { observe } from "../observability";
-import { verifyJwt } from "../auth";
+import { verifyJwt, jwtFailureMessage } from "../auth";
 
 export class LyricsV2 extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
@@ -59,12 +59,12 @@ export class LyricsV2 extends OpenAPIRoute {
 
         if (!(env.BYPASS_AUTH === "true")) {
             if (!token) {
-                return c.json({ error: 'Authorization token missing or malformed' }, 403);
+                return c.json({ error: 'Authorization token missing', reason: 'missing_token' }, 403);
             }
 
-            const isTokenValid = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
-            if (!isTokenValid) {
-                return c.json({ error: 'Invalid or expired token' }, 403);
+            const result = await verifyJwt(token, env.JWT_SECRET, request.headers.get("CF-Connecting-IP") || "");
+            if (!result.valid) {
+                return c.json({ error: jwtFailureMessage(result.reason), reason: result.reason }, 403);
             }
         }
 
