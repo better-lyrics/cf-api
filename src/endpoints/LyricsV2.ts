@@ -96,8 +96,8 @@ export class LyricsV2 extends OpenAPIRoute {
              observe({ usingCachedLyrics: true, v2: true });
              const result = await cachedResponse.json() as any;
              
-             // Run in background to not block the response return
-             (async () => {
+             // Use waitUntil to ensure the background process survives after returning the response
+             c.executionCtx.waitUntil((async () => {
                 try {
                     await sendEvent({ type: 'metadata', data: { 
                         song: result.song, 
@@ -138,7 +138,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 } finally {
                     await writer.close();
                 }
-             })();
+             })());
 
              return new Response(readable, {
                 headers: {
@@ -153,7 +153,7 @@ export class LyricsV2 extends OpenAPIRoute {
         const service = new LyricsService(env);
 
         // Background process to fetch and stream
-        (async () => {
+        c.executionCtx.waitUntil((async () => {
             try {
                 const fullResult = await service.getLyricsStreaming(params, async (event) => {
                     await sendEvent(event);
@@ -175,7 +175,7 @@ export class LyricsV2 extends OpenAPIRoute {
             } finally {
                 await writer.close();
             }
-        })();
+        })());
 
         return new Response(readable, {
             headers: {
