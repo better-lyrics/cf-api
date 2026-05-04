@@ -85,9 +85,11 @@ export class LyricsV2 extends OpenAPIRoute {
         const writer = writable.getWriter();
         const encoder = new TextEncoder();
 
-        const sendEvent = async (event: StreamingEvent) => {
+        let writePromise = Promise.resolve();
+        const sendEvent = (event: StreamingEvent) => {
             const chunk = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
-            await writer.write(encoder.encode(chunk));
+            writePromise = writePromise.then(() => writer.write(encoder.encode(chunk)));
+            return writePromise;
         };
 
         if (cachedResponse) {
