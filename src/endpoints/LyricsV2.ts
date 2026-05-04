@@ -80,7 +80,7 @@ export class LyricsV2 extends OpenAPIRoute {
 
         const cache = caches.default;
         const cachedResponse = await cache.match(cacheKey);
-        
+
         const { readable, writable } = new TransformStream();
         const writer = writable.getWriter();
         const encoder = new TextEncoder();
@@ -88,35 +88,46 @@ export class LyricsV2 extends OpenAPIRoute {
         let writePromise = Promise.resolve();
         const sendEvent = (event: StreamingEvent) => {
             const chunk = `event: ${event.type}\ndata: ${JSON.stringify(event.data)}\n\n`;
-            writePromise = writePromise.then(() => writer.write(encoder.encode(chunk)));
+            writePromise = writePromise.then(() => writer.write(encoder.encode(chunk))).catch(err => {
+                console.error("Stream write error:", err);
+                observe({ streamWriteError: err.message || String(err) });
+            });
             return writePromise;
         };
 
         if (cachedResponse) {
              observe({ usingCachedLyrics: true, v2: true });
              const result = await cachedResponse.json() as any;
-             
              // Use waitUntil to ensure the background process survives after returning the response
              c.executionCtx.waitUntil((async () => {
                 try {
-                    await sendEvent({ type: 'metadata', data: { 
-                        song: result.song, 
-                        artist: result.artist, 
-                        album: result.album, 
-                        duration: result.duration, 
-                        videoId: result.videoId 
+                    await sendEvent({ type: 'metadata', data: {
+                        song: result.song,
+                        artist: result.artist,
+                        album: result.album,
+                        duration: result.duration,
+                        videoId: result.videoId
                     }});
-                    
+                    observe({ cachedSentMeta:  {
+                            song: result.song,
+                            artist: result.artist,
+                            album: result.album,
+                            duration: result.duration,
+                            videoId: result.videoId
+                        }
+                    });
+
+
                     if (result.lrclibSyncedLyrics || result.lrclibPlainLyrics) {
-                        await sendEvent({ type: 'provider', data: { 
-                            provider: 'lrclib', 
-                            results: { synced: result.lrclibSyncedLyrics, plain: result.lrclibPlainLyrics } 
+                        await sendEvent({ type: 'provider', data: {
+                            provider: 'lrclib',
+                            results: { synced: result.lrclibSyncedLyrics, plain: result.lrclibPlainLyrics }
                         }});
                     }
                     if (result.musixmatchSyncedLyrics || result.musixmatchWordByWordLyrics) {
-                        await sendEvent({ type: 'provider', data: { 
-                            provider: 'musixmatch', 
-                            results: { synced: result.musixmatchSyncedLyrics, wordByWord: result.musixmatchWordByWordLyrics } 
+                        await sendEvent({ type: 'provider', data: {
+                            provider: 'musixmatch',
+                            results: { synced: result.musixmatchSyncedLyrics, wordByWord: result.musixmatchWordByWordLyrics }
                         }});
                     }
                     if (result.goLyricsApiLyrics) {
@@ -134,6 +145,7 @@ export class LyricsV2 extends OpenAPIRoute {
 
                     await sendEvent({ type: 'done', data: {} });
                 } catch (e) {
+                    observe({ streamingCachedResponseError: e });
                     console.error("Error streaming cached response:", e);
                 } finally {
                     await writer.close();
@@ -173,6 +185,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 console.error("Streaming error:", e);
                 await sendEvent({ type: 'error', data: { message: e.message || "Internal Error" } });
             } finally {
+                await writePromise;
                 await writer.close();
             }
         })());
