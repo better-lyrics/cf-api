@@ -15,7 +15,7 @@ export interface BoiduLyricsApiParameters {
 }
 
 const DEFAULT_REFETCH_THRESHOLD = 2 * 86400;
-const DEFAULT_REFETCH_CHANCE = 0.15;
+const DEFAULT_REFETCH_CHANCE = 1;
 export interface BoiduLyrics {
     lyrics: string | null;
 }
