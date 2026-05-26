@@ -60,3 +60,11 @@ cpu_ms = 25
 [assets]
 directory = "./assets"
 binding = "ASSETS"
+
+[[ratelimits]]
+name = "RATE_LIMIT"
+namespace_id = "1298"
+
+  [ratelimits.simple]
+  limit = 20
+  period = 60
