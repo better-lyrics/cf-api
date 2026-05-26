@@ -1,6 +1,7 @@
 // src/auth.ts
 
 import { observe } from './observability';
+import { env } from 'cloudflare:workers';
 
 interface TurnstileVerificationResponse {
     'success': boolean;
@@ -60,6 +61,7 @@ export async function createJwt(secretKey: string, ipAddress: string): Promise<s
     const payload = {
         iat: Math.floor(Date.now() / 1000),
         exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24), // 24-hour expiration
+        jti: crypto.randomUUID(),
         ip: ipAddress, // Bind the token to the user's IP address
     };
 
@@ -86,8 +88,8 @@ export async function createJwt(secretKey: string, ipAddress: string): Promise<s
 }
 
 export type JwtVerificationResult =
-    | { valid: true }
-    | { valid: false; reason: 'malformed' | 'expired' | 'ip_mismatch' | 'bad_signature' | 'error' };
+    | { valid: true, jti: string }
+    | { valid: false; reason: 'malformed' | 'expired' | 'ip_mismatch' | 'bad_signature' | 'rate_limited' | 'bad_jti' | 'error'  };
 
 /**
  * Verifies an incoming JWT's signature, expiration, and IP address claim.
@@ -111,13 +113,7 @@ export async function verifyJwt(token: string, secretKey: string, requestIp: str
             return { valid: false, reason: 'expired' };
         }
 
-        // 2. Check if the IP address matches the one in the token
-        if (payload.ip !== requestIp) {
-            observe({ jwtLog: `JWT IP mismatch. Token IP: ${payload.ip}, Request IP: ${requestIp}` });
-            return { valid: false, reason: 'ip_mismatch' };
-        }
-
-        // 3. Verify the signature
+        // 2. Verify the signature
         const key = await crypto.subtle.importKey(
             'raw',
             new TextEncoder().encode(secretKey),
@@ -140,7 +136,22 @@ export async function verifyJwt(token: string, secretKey: string, requestIp: str
             return { valid: false, reason: 'bad_signature' };
         }
 
-        return { valid: true };
+        if (!payload.jti) {
+            return { valid: false, reason: 'bad_jti' };
+        }
+
+        try {
+            const { success } = await env.RATE_LIMIT.limit({ key: payload.jti })
+
+            if (!success) {
+                return { valid: false, reason: 'rate_limited' };
+            }
+        } catch (e) {
+            observe({ jwtLog: 'Rate Limit Error', error: e });
+        }
+
+
+        return { valid: true, jti: payload.jti };
     } catch (e) {
         console.error("JWT verification error:", e);
         return { valid: false, reason: 'error' };
@@ -152,6 +163,8 @@ const JWT_REASON_MESSAGES: Record<Exclude<JwtVerificationResult, { valid: true }
     expired: 'Authorization token has expired',
     ip_mismatch: 'Authorization token IP does not match request IP',
     bad_signature: 'Authorization token signature verification failed',
+    rate_limited: 'Too many requests with this Authorization token. Try again later',
+    bad_jti: 'JTI is invalid',
     error: 'Authorization token could not be verified',
 };
 
