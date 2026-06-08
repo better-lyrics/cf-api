@@ -44,9 +44,10 @@ describe('BoiduLyricsApi', () => {
 
     it('clears a negative mapping after an identical successful refresh', async () => {
         const { provider, prepare, bind, run } = createProvider();
+        const wrappedLyrics = JSON.stringify({ ttml: '<tt>fresh</tt>' });
         provider.cacheService = {
             getGoLyrics: vi.fn().mockResolvedValue({
-                lyrics: [{ format: 'ttml', content: '<tt>fresh</tt>' }],
+                lyrics: [{ format: 'ttml', content: wrappedLyrics }],
                 lastUpdatedAt: Math.floor(Date.now() / 1000),
             }),
             touchGoLyrics: vi.fn().mockResolvedValue(undefined),
@@ -61,7 +62,7 @@ describe('BoiduLyricsApi', () => {
             return lyrics;
         });
 
-        expect(result?.lyrics).toBe('<tt>fresh</tt>');
+        expect(result?.lyrics).toBe(wrappedLyrics);
         expect(prepare).toHaveBeenCalledWith(
             'DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2'
         );
@@ -86,7 +87,7 @@ describe('BoiduLyricsApi', () => {
             return lyrics;
         });
 
-        expect(result?.lyrics).toBe('<tt>now available</tt>');
+        expect(result?.lyrics).toBe(JSON.stringify({ ttml: '<tt>now available</tt>' }));
     });
 
     it('does not negative-cache an upstream miss when positive lyrics exist', async () => {
