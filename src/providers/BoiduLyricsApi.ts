@@ -20,11 +20,6 @@ export interface BoiduLyrics {
     lyrics: string | null;
 }
 
-interface BoiduLyricsApiResponse {
-    ttml?: string;
-    lyrics?: string;
-}
-
 export class BoiduLyricsApi {
     private readonly ROOT_URL: string;
     private readonly sourceName: SourcePlatform;
@@ -83,15 +78,6 @@ export class BoiduLyricsApi {
         return this.cacheService.saveGoLyrics(data);
     }
 
-    private parseLyrics(body: string): string {
-        try {
-            const parsed = JSON.parse(body) as BoiduLyricsApiResponse;
-            return parsed.ttml ?? parsed.lyrics ?? body;
-        } catch {
-            return body;
-        }
-    }
-
     private clearNegative(videoId: string): void {
         addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
             .bind(this.sourceName, videoId).run());
@@ -113,7 +99,7 @@ export class BoiduLyricsApi {
             return null;
         }
 
-        const ttml = this.parseLyrics(await response.text());
+        const ttml = await response.text();
 
         if (ttml) {
             let identical = false;

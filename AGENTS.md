@@ -23,6 +23,10 @@ Use TypeScript ES modules and keep strict typing enabled. Source and tests gener
 
 Write `*.spec.ts` files under `test/`. Use `vitest` with `cloudflare:test` helpers such as `createExecutionContext`, `env`, and `SELF`. Cover authentication, status codes, streaming behavior, cache-sensitive paths, and provider failures when changing those areas. Run `npm run lint` and `npx vitest run` before opening a pull request.
 
+## API Compatibility
+
+Explicitly ask the user for permission before making any change to the external API surface. This includes response shapes, field names, payload formats, status codes, headers, streaming event names or contents, and other externally observable behavior. Preserve existing client-facing behavior unless the user approves the change.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses short, imperative commit subjects such as `Add JWT rate limiting via Cloudflare rate limit binding` and `Ensure that writes to the response stream happen sequentially in Lyrics v2`. Keep subjects concise and specific; reference issues or PR numbers when applicable. Pull requests should describe the behavior change, list testing performed, mention any new bindings/secrets/migrations, and include screenshots only for asset or challenge-page changes.
