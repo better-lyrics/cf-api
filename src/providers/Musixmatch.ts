@@ -473,7 +473,7 @@ export class Musixmatch {
                 }
             });
             // Negative Cache Save
-            if (data.message.header.status_code === 404) {
+            if (data.message.header.status_code === 404 && !cachedData) {
                 addAwait(this.cacheService.saveNegative('youtube_music', videoId));
             }
             return null;
@@ -512,10 +512,6 @@ export class Musixmatch {
             if (identical) {
                 addAwait(this.cacheService.touchMusixmatch('youtube_music', videoId));
             } else {
-                // Clear negative cache if it existed
-                addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                    .bind('youtube_music', videoId).run());
-
                 if (result.richSynced) {
                     addAwait(
                         this.cacheService.saveMusixmatchLyrics({
@@ -539,8 +535,10 @@ export class Musixmatch {
                     );
                 }
             }
+            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                .bind('youtube_music', videoId).run());
         } else {
-             addAwait(this.cacheService.saveNegative('youtube_music', videoId));
+             if (!cachedData) addAwait(this.cacheService.saveNegative('youtube_music', videoId));
         }
 
         return result;
@@ -557,11 +555,10 @@ export class Musixmatch {
             // 1. Check Negative Cache
             const negativeStatus = await this.cacheService.getNegative('youtube_music', videoId);
             if (negativeStatus.hit) {
-                if (negativeStatus.stale) {
-                    // SWR: Fetch in background
+                if (negativeStatus.stale && cachedData) {
                     addAwait(this.fetchAndSave(videoId, artist, track, album, lrcLyrics, tokenPromise, cachedData));
                 }
-                return null;
+                if (!negativeStatus.stale && !cachedData) return null;
             }
 
             let shouldRefetch = false;
@@ -623,8 +620,37 @@ export class Musixmatch {
                 }
                 return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
             }
+            if (cachedData) {
+                let cachedRich: string | null = null;
+                let cachedNormal: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "rich_sync") cachedRich = lyric.content;
+                    else if (lyric.format == "normal_sync") cachedNormal = lyric.content;
+                }
+                return {
+                    richSynced: cachedRich,
+                    synced: cachedNormal,
+                    action: 'same',
+                    timestamp: cachedData.lastUpdatedAt
+                };
+            }
             return null;
         } catch (e: any) {
+            if (cachedData) {
+                let cachedRich: string | null = null;
+                let cachedNormal: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "rich_sync") cachedRich = lyric.content;
+                    else if (lyric.format == "normal_sync") cachedNormal = lyric.content;
+                }
+                return {
+                    richSynced: cachedRich,
+                    synced: cachedNormal,
+                    action: 'failed',
+                    error: e.message,
+                    timestamp: cachedData.lastUpdatedAt
+                };
+            }
             return { richSynced: null, synced: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
         }
     }
