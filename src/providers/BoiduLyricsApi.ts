@@ -20,6 +20,10 @@ export interface BoiduLyrics {
     lyrics: string | null;
 }
 
+interface BoiduLyricsApiResponse {
+    ttml?: string;
+    lyrics?: string;
+}
 
 export class BoiduLyricsApi {
     private readonly ROOT_URL: string;
@@ -79,6 +83,20 @@ export class BoiduLyricsApi {
         return this.cacheService.saveGoLyrics(data);
     }
 
+    private parseLyrics(body: string): string {
+        try {
+            const parsed = JSON.parse(body) as BoiduLyricsApiResponse;
+            return parsed.ttml ?? parsed.lyrics ?? body;
+        } catch {
+            return body;
+        }
+    }
+
+    private clearNegative(videoId: string): void {
+        addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+            .bind(this.sourceName, videoId).run());
+    }
+
     private async fetchAndSave(videoId: string, providerParameters: BoiduLyricsApiParameters, cachedData?: { lyrics: any[], lastUpdatedAt: number } | null): Promise<BoiduLyrics | null> {
         const response = await this._get(providerParameters);
 
@@ -89,13 +107,13 @@ export class BoiduLyricsApi {
                     body: await response.text(),
                 }
             });
-            if (response.status === 404) {
+            if (response.status === 404 && !cachedData) {
                 addAwait(this.cacheService.saveNegative(this.sourceName, videoId));
             }
             return null;
         }
 
-        const ttml = await response.text();
+        const ttml = this.parseLyrics(await response.text());
 
         if (ttml) {
             let identical = false;
@@ -126,13 +144,11 @@ export class BoiduLyricsApi {
                         lyric_content: ttml,
                     })
                 );
-
-                addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                    .bind(this.sourceName, videoId).run());
             }
 
+            this.clearNegative(videoId);
         } else {
-            addAwait(this.cacheService.saveNegative(this.sourceName, videoId));
+            if (!cachedData) addAwait(this.cacheService.saveNegative(this.sourceName, videoId));
         }
 
         return {
@@ -148,11 +164,11 @@ export class BoiduLyricsApi {
             // 1. Check Negative Cache
             const negativeStatus = await this.cacheService.getNegative(this.sourceName, videoId);
             if (negativeStatus.hit) {
-                if (negativeStatus.stale) {
-                    // SWR: Return null, but fetch in background
+                if (negativeStatus.stale && cachedData) {
+                    // Refresh in the background while serving any existing positive cache entry.
                     addAwait(this.fetchAndSave(videoId, providerParameters, cachedData));
                 }
-                return null;
+                if (!negativeStatus.stale && !cachedData) return null;
             }
 
             let shouldRefetch = false;
@@ -205,8 +221,27 @@ export class BoiduLyricsApi {
                 }
                 return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
             }
+            if (cachedData) {
+                let cachedTtml: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "ttml") cachedTtml = lyric.content;
+                }
+                return { lyrics: cachedTtml, action: 'same', timestamp: cachedData.lastUpdatedAt };
+            }
             return null;
         } catch (e: any) {
+            if (cachedData) {
+                let cachedTtml: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format == "ttml") cachedTtml = lyric.content;
+                }
+                return {
+                    lyrics: cachedTtml,
+                    action: 'failed',
+                    error: e.message,
+                    timestamp: cachedData.lastUpdatedAt
+                };
+            }
             return { lyrics: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
         }
     }

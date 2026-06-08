@@ -49,7 +49,7 @@ export class LrcLib {
             });
 
             if (res.status === 404) {
-                 addAwait(this.cacheService.saveNegative('lrclib', videoId));
+                 if (!cachedData) addAwait(this.cacheService.saveNegative('lrclib', videoId));
                  return null;
             }
 
@@ -59,6 +59,10 @@ export class LrcLib {
             }
 
             const json = await res.json() as LrcLibResponse;
+            if (!json.syncedLyrics && !json.plainLyrics) {
+                if (!cachedData) addAwait(this.cacheService.saveNegative('lrclib', videoId));
+                return null;
+            }
 
             let identical = false;
             if (cachedData) {
@@ -70,19 +74,16 @@ export class LrcLib {
             if (identical) {
                 addAwait(this.cacheService.touchLrcLib('youtube_music', videoId));
             } else {
-                // If we found lyrics, ensure negative cache is cleared
-                addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                    .bind('lrclib', videoId).run());
-
-                if (json.syncedLyrics || json.plainLyrics) {
-                    addAwait(this.cacheService.saveLrcLib({
-                        source_platform: 'youtube_music',
-                        source_track_id: videoId,
-                        lyric_content: JSON.stringify({ synced: json.syncedLyrics, unsynced: json.plainLyrics }),
-                        lyric_format: 'normal_sync'
-                    }));
-                }
+                addAwait(this.cacheService.saveLrcLib({
+                    source_platform: 'youtube_music',
+                    source_track_id: videoId,
+                    lyric_content: JSON.stringify({ synced: json.syncedLyrics, unsynced: json.plainLyrics }),
+                    lyric_format: 'normal_sync'
+                }));
             }
+
+            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+                .bind('lrclib', videoId).run());
 
             return {
                 synced: json.syncedLyrics,
@@ -102,11 +103,10 @@ export class LrcLib {
             // 1. Check Negative Cache
             const negativeStatus = await this.cacheService.getNegative('lrclib', videoId);
             if (negativeStatus.hit) {
-                if (negativeStatus.stale) {
-                    // SWR: Return null, but fetch in background
+                if (negativeStatus.stale && cachedData) {
                     addAwait(this.fetchAndSave(videoId, artist, song, album, duration, cachedData));
                 }
-                return null;
+                if (!negativeStatus.stale && !cachedData) return null;
             }
 
             let shouldRefetch = false;
@@ -146,8 +146,25 @@ export class LrcLib {
                 }
                 return { ...result, action: action, timestamp: Math.floor(Date.now() / 1000) };
             }
+            if (cachedData) {
+                return {
+                    synced: cachedData.synced,
+                    unsynced: cachedData.unsynced,
+                    action: 'same',
+                    timestamp: cachedData.lastUpdatedAt
+                };
+            }
             return null;
         } catch (e: any) {
+            if (cachedData) {
+                return {
+                    synced: cachedData.synced,
+                    unsynced: cachedData.unsynced,
+                    action: 'failed',
+                    error: e.message,
+                    timestamp: cachedData.lastUpdatedAt
+                };
+            }
             return { synced: null, unsynced: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
         }
     }

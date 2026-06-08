@@ -97,7 +97,7 @@ export class Binimum {
         const result = await this._fetch(params);
 
         if (!result || !result.lyrics) {
-            addAwait(this.cacheService.saveNegative(SOURCE_PLATFORM, videoId));
+            if (!cachedData) addAwait(this.cacheService.saveNegative(SOURCE_PLATFORM, videoId));
             return null;
         }
 
@@ -123,9 +123,10 @@ export class Binimum {
             };
             addAwait(this.cacheService.saveBinimumLyrics(saveData, result.timingType));
 
-            addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
-                .bind(SOURCE_PLATFORM, videoId).run());
         }
+
+        addAwait(this.env.DB.prepare("DELETE FROM negative_mappings WHERE source_platform = ?1 AND source_track_id = ?2")
+            .bind(SOURCE_PLATFORM, videoId).run());
 
         return result;
     }
@@ -136,10 +137,10 @@ export class Binimum {
         if (!force) {
             const negativeStatus = await this.cacheService.getNegative(SOURCE_PLATFORM, videoId);
             if (negativeStatus.hit) {
-                if (negativeStatus.stale) {
+                if (negativeStatus.stale && cachedData) {
                     addAwait(this.fetchAndSave(videoId, params, cachedData));
                 }
-                return null;
+                if (!negativeStatus.stale && !cachedData) return null;
             }
 
             if (cachedData) {
@@ -178,8 +179,33 @@ export class Binimum {
                 if (cachedTtml === result.lyrics) action = 'same';
                 return { ...result, action, timestamp: Math.floor(Date.now() / 1000) };
             }
+            if (cachedData) {
+                let cachedTtml: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format === 'ttml') cachedTtml = lyric.content;
+                }
+                return {
+                    lyrics: cachedTtml,
+                    timingType: cachedData.timingType,
+                    action: 'same',
+                    timestamp: cachedData.lastUpdatedAt,
+                };
+            }
             return null;
         } catch (e: any) {
+            if (cachedData) {
+                let cachedTtml: string | null = null;
+                for (const lyric of cachedData.lyrics) {
+                    if (lyric.format === 'ttml') cachedTtml = lyric.content;
+                }
+                return {
+                    lyrics: cachedTtml,
+                    timingType: cachedData.timingType,
+                    action: 'failed',
+                    error: e.message,
+                    timestamp: cachedData.lastUpdatedAt,
+                };
+            }
             return { lyrics: null, timingType: null, action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
         }
     }
