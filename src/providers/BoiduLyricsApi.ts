@@ -3,7 +3,7 @@ import { CacheService, SaveLyricsData, SourcePlatform } from '../services/CacheS
 import { Env } from '../types';
 
 const Constants = {
-    LYRICS_API_URL: 'https://lyrics-api.boidu.dev/getLyrics'
+    LYRICS_API_URL: 'https://api.betterlyrics.org/getLyrics'
 }
 
 export interface BoiduLyricsApiParameters {
