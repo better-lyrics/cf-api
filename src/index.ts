@@ -7,6 +7,7 @@ import { VerifyTurnstile } from "./endpoints/VerifyTurnstile";
 import { DeleteCache } from "./endpoints/DeleteCache";
 import { RevalidateCache } from "./endpoints/RevalidateCache";
 import { flushObservability, runWithObservability } from "./observability";
+import { Spicy } from "./providers/Spicy";
 import { Env } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -93,5 +94,8 @@ export default {
                 ctx.waitUntil(flushObservability());
             }
         });
+    },
+    scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
+        ctx.waitUntil(new Spicy(env).purgeExpired().then(deleted => console.log(JSON.stringify({ spicyPurgedRows: deleted }))));
     }
 };

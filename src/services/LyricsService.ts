@@ -3,6 +3,7 @@ import { MetadataService } from './MetadataService';
 import { Musixmatch } from '../providers/Musixmatch';
 import { BoiduLyricsApi } from '../providers/BoiduLyricsApi';
 import { Binimum } from '../providers/Binimum';
+import { Spicy } from '../providers/Spicy';
 import { LrcLib } from '../providers/LrcLib';
 import { observe } from '../observability';
 import { isTruthy, sleep } from '../utils';
@@ -14,6 +15,7 @@ export class LyricsService {
     private qqLyrics: BoiduLyricsApi;
     private kugouLyrics: BoiduLyricsApi;
     private binimum: Binimum;
+    private spicy: Spicy;
     private lrcLib: LrcLib;
     private env: Env;
 
@@ -25,6 +27,7 @@ export class LyricsService {
         this.qqLyrics = new BoiduLyricsApi(env, 'qq', 'https://lyrics-api.boidu.dev/qq/getLyrics');
         this.kugouLyrics = new BoiduLyricsApi(env, 'kugou', 'https://lyrics-api.boidu.dev/kugou/getLyrics');
         this.binimum = new Binimum(env);
+        this.spicy = new Spicy(env);
         this.lrcLib = new LrcLib(env);
     }
 
@@ -263,6 +266,9 @@ export class LyricsService {
             kugouLyricsApiLyrics: null,
             binimumLyrics: null,
             binimumTimingType: null,
+            spicyLyrics: null,
+            spicyTimingType: null,
+            spicyAttribution: null,
         };
 
         const currentArtist = artists.join(', ');
@@ -344,6 +350,20 @@ export class LyricsService {
                     onEvent({ type: 'provider', data: { provider: 'binimum', results: { lyrics: lyrics.lyrics, timingType: lyrics.timingType } } });
                 }
             }));
+
+            promises.push(this.spicy.getLrc(videoId, { song: currentSong, artist: currentArtist, duration, isrc })
+                .then(lyrics => {
+                    if (lyrics && lyrics.lyrics) {
+                        fullResponse.spicyLyrics = lyrics.lyrics;
+                        fullResponse.spicyTimingType = lyrics.timingType;
+                        fullResponse.spicyAttribution = lyrics.attribution;
+                        onEvent({ type: 'provider', data: { provider: 'spicy', results: { lyrics: lyrics.lyrics, timingType: lyrics.timingType, attribution: lyrics.attribution } } });
+                    }
+                })
+                .catch(e => {
+                    console.error("Spicy error:", e);
+                    onEvent({ type: 'error', data: { message: `Spicy error: ${e?.message ?? e}`, provider: 'spicy' } });
+                }));
         }
 
         // Wait for all providers
@@ -427,6 +447,9 @@ export class LyricsService {
             const isrc = params.get('isrc');
             const binimumResult = await this.binimum.getLrc(videoId, { ...boiduParams, isrc }, true);
             status.binimum = { action: binimumResult?.action || 'failed', timestamp: binimumResult?.timestamp, error: binimumResult?.error };
+
+            const spicyResult = await this.spicy.getLrc(videoId, { song: combo.song, artist: combo.artist, duration, isrc }, true);
+            status.spicy = { action: spicyResult?.action || 'failed', timestamp: spicyResult?.timestamp, error: spicyResult?.error };
         }
 
         return { success: true, videoId, status };

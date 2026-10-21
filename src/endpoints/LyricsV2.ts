@@ -142,6 +142,9 @@ export class LyricsV2 extends OpenAPIRoute {
                     if (result.binimumLyrics) {
                         await sendEvent({ type: 'provider', data: { provider: 'binimum', results: { lyrics: result.binimumLyrics, timingType: result.binimumTimingType ?? null } }});
                     }
+                    if (result.spicyLyrics) {
+                        await sendEvent({ type: 'provider', data: { provider: 'spicy', results: { lyrics: result.spicyLyrics, timingType: result.spicyTimingType ?? null, attribution: result.spicyAttribution ?? null } }});
+                    }
 
                     await sendEvent({ type: 'done', data: {} });
                 } catch (e) {
@@ -174,7 +177,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 if (fullResult) {
                     // Cache the full result for future requests (v1 or v2)
                     const cacheResponse = Response.json(fullResult);
-                    if (fullResult.musixmatchSyncedLyrics || fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics || fullResult.binimumLyrics) {
+                    if (fullResult.musixmatchSyncedLyrics || fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics || fullResult.binimumLyrics || fullResult.spicyLyrics) {
                         cacheResponse.headers.set('Cache-control', 'public; max-age=1080');
                     } else {
                         cacheResponse.headers.set("Cache-control", "public; max-age=600");
