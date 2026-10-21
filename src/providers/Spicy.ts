@@ -48,7 +48,8 @@ function now(): number {
 }
 
 function contributor(input: SpicyContributor | undefined): SpicyContributor | undefined {
-    return input ? { username: input.username, url: input.url } : undefined;
+    if (typeof input?.username !== 'string' || typeof input.url !== 'string') return undefined;
+    return { username: input.username, url: input.url };
 }
 
 export class Spicy {
