@@ -38,6 +38,8 @@ export interface Env extends Omit<Cloudflare.Env, "DB"> {
     TURNSTILE_SECRET_KEY: string;
     GOOGLE_API_KEY: string;
     GO_API_KEY: string;
+    SPICY_API_KEY: string;
+    SPICY_TOKEN_API_KEY: string;
     ALLOWED_ORIGINS: string;
     LYRICS_BUCKET: R2Bucket;
 }

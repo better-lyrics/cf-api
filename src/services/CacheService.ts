@@ -1,9 +1,12 @@
 import { Env } from '../types';
 import pako from 'pako';
 import { addAwait, observe } from '../observability';
+import type { SpicyLyrics, SpicyTimingType } from '../providers/Spicy';
 
 export type LyricType = 'rich_sync' | 'normal_sync' | 'ttml';
-export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib' | 'qq' | 'kugou' | 'binimum';
+export type SourcePlatform = 'youtube_music' | 'spotify' | 'apple_music' | 'musixmatch' | 'golyrics' | 'lrclib' | 'qq' | 'kugou' | 'binimum' | 'spicy';
+
+export type CachedSpicyLyrics = SpicyLyrics & { lyrics: string, spotifyId: string, lastUpdatedAt: number };
 
 export interface Lyric {
     format: LyricType;
@@ -26,6 +29,7 @@ export interface NegativeCacheData {
 const DEFAULT_NEGATIVE_CACHE_TTL = 0;
 const DEFAULT_NEGATIVE_CACHE_TTL_LRCLIB = 0;
 const DEFAULT_NEGATIVE_CACHE_TTL_MUSIXMATCH = 5 * 86400; // 5 days
+const DEFAULT_NEGATIVE_CACHE_TTL_SPICY = 3 * 86400;
 
 export class CacheService {
     constructor(private env: Env) {}
@@ -310,6 +314,83 @@ export class CacheService {
         return this.touchBoiduLyrics('binimum_lyrics_cache', source_platform, source_track_id);
     }
 
+    async getSpicyLyrics(source_platform: SourcePlatform, source_track_id: string): Promise<CachedSpicyLyrics | null> {
+        const result = await this.env.DB.prepare(`
+            SELECT r2_key, spotify_id, timing_type, attribution, last_accessed_at, last_updated_at FROM spicy_lyrics_cache WHERE video_id = ?1 AND source_platform = ?2
+        `).bind(source_track_id, source_platform).first<{ r2_key: string, spotify_id: string, timing_type: SpicyTimingType | null, attribution: string | null, last_accessed_at: number, last_updated_at: number }>();
+
+        if (!result) return null;
+
+        const now = Math.floor(Date.now() / 1000);
+        if (now - result.last_accessed_at > 86400) {
+            addAwait(
+                this.env.DB.prepare("UPDATE spicy_lyrics_cache SET last_accessed_at = ?1 WHERE video_id = ?2 AND source_platform = ?3")
+                    .bind(now, source_track_id, source_platform).run()
+            );
+        }
+
+        const object = await this.env.LYRICS_BUCKET.get(result.r2_key);
+        if (!object) return null;
+        const lyrics = pako.inflate(await object.arrayBuffer(), { to: 'string' });
+
+        return {
+            lyrics,
+            timingType: result.timing_type,
+            attribution: result.attribution ? JSON.parse(result.attribution) : null,
+            spotifyId: result.spotify_id,
+            lastUpdatedAt: result.last_updated_at,
+        };
+    }
+
+    async saveSpicyLyrics(source_platform: SourcePlatform, source_track_id: string, data: Omit<CachedSpicyLyrics, 'lastUpdatedAt'>): Promise<boolean> {
+        try {
+            const r2Key = `${source_track_id}/spicy_ttml.gz`;
+            await this.env.LYRICS_BUCKET.put(r2Key, pako.deflate(data.lyrics));
+
+            const now = Math.floor(Date.now() / 1000);
+            await this.env.DB.prepare(`
+                INSERT INTO spicy_lyrics_cache (video_id, source_platform, r2_key, spotify_id, timing_type, attribution, last_accessed_at, last_updated_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)
+                ON CONFLICT(video_id, source_platform) DO UPDATE SET r2_key = ?3, spotify_id = ?4, timing_type = ?5, attribution = ?6, last_accessed_at = ?7, last_updated_at = ?7
+            `).bind(source_track_id, source_platform, r2Key, data.spotifyId, data.timingType, data.attribution ? JSON.stringify(data.attribution) : null, now).run();
+            return true;
+        } catch (_e) {
+            return false;
+        }
+    }
+
+    async touchSpicyLyrics(source_platform: SourcePlatform, source_track_id: string) {
+        return this.touchBoiduLyrics('spicy_lyrics_cache', source_platform, source_track_id);
+    }
+
+    async deleteSpicyLyrics(videoId: string) {
+        return this.deleteR2BackedRow('spicy_lyrics_cache', videoId);
+    }
+
+    async deleteSpicyLyricsUpdatedBefore(cutoff: number): Promise<number> {
+        let deleted = 0;
+        for (;;) {
+            // D1 allows at most 100 bound parameters per statement.
+            const { results } = await this.env.DB.prepare(
+                "SELECT rowid AS id, r2_key FROM spicy_lyrics_cache WHERE last_updated_at < ?1 LIMIT 99"
+            ).bind(cutoff).all<{ id: number, r2_key: string }>();
+            if (results.length === 0) return deleted;
+
+            await this.env.LYRICS_BUCKET.delete(results.map(row => row.r2_key));
+            await this.env.DB.prepare(`DELETE FROM spicy_lyrics_cache WHERE rowid IN (${results.map((_, i) => `?${i + 1}`).join(', ')})`)
+                .bind(...results.map(row => row.id)).run();
+            deleted += results.length;
+        }
+    }
+
+    private async deleteR2BackedRow(table: string, videoId: string): Promise<void> {
+        const row = await this.env.DB.prepare(`SELECT r2_key FROM ${table} WHERE video_id = ?1`).bind(videoId).first<{r2_key: string}>();
+        if (row) {
+            addAwait(this.env.LYRICS_BUCKET.delete(row.r2_key));
+            await this.env.DB.prepare(`DELETE FROM ${table} WHERE video_id = ?1`).bind(videoId).run();
+        }
+    }
+
     async getLrcLib(source_platform: SourcePlatform, source_track_id: string): Promise<{ synced: string | null, unsynced: string | null, lastUpdatedAt: number } | null> {
         const stmt = this.env.DB.prepare(`
             SELECT r2_key, last_accessed_at, last_updated_at FROM lrclib_cache WHERE video_id = ?1 AND source_platform = ?2
@@ -382,6 +463,8 @@ export class CacheService {
             ttl = this.env.NEGATIVE_CACHE_TTL_LRCLIB ? parseInt(this.env.NEGATIVE_CACHE_TTL_LRCLIB) : DEFAULT_NEGATIVE_CACHE_TTL_LRCLIB;
         } else if (source_platform === 'youtube_music') { // Mapped to Musixmatch in provider logic
             ttl = this.env.NEGATIVE_CACHE_TTL_MUSIXMATCH ? parseInt(this.env.NEGATIVE_CACHE_TTL_MUSIXMATCH) : DEFAULT_NEGATIVE_CACHE_TTL_MUSIXMATCH;
+        } else if (source_platform === 'spicy') {
+            ttl = DEFAULT_NEGATIVE_CACHE_TTL_SPICY;
         }
 
         if (now - result.created_at > ttl) {
@@ -421,13 +504,9 @@ export class CacheService {
          }
 
          // 2. Delete Boidu sources and cleanup R2
-         const boiduSources = ['go_lyrics_cache', 'qq_lyrics_cache', 'kugou_lyrics_cache', 'binimum_lyrics_cache'];
+         const boiduSources = ['go_lyrics_cache', 'qq_lyrics_cache', 'kugou_lyrics_cache', 'binimum_lyrics_cache', 'spicy_lyrics_cache'];
          for (const table of boiduSources) {
-             const row = await this.env.DB.prepare(`SELECT r2_key FROM ${table} WHERE video_id = ?1`).bind(videoId).first<{r2_key: string}>();
-             if (row) {
-                 addAwait(this.env.LYRICS_BUCKET.delete(row.r2_key));
-                 await this.env.DB.prepare(`DELETE FROM ${table} WHERE video_id = ?1`).bind(videoId).run();
-             }
+             await this.deleteR2BackedRow(table, videoId);
          }
 
          // 3. Delete YouTube metadata cache

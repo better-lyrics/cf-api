@@ -68,3 +68,6 @@ namespace_id = "1298"
   [ratelimits.simple]
   limit = 20
   period = 60
+
+[triggers]
+crons = ["0 * * * *"]
