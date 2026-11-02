@@ -6,8 +6,10 @@ import { LyricsV2 } from "./endpoints/LyricsV2";
 import { VerifyTurnstile } from "./endpoints/VerifyTurnstile";
 import { DeleteCache } from "./endpoints/DeleteCache";
 import { RevalidateCache } from "./endpoints/RevalidateCache";
+import { UnisonInvalidate } from "./endpoints/UnisonInvalidate";
 import { flushObservability, runWithObservability } from "./observability";
 import { Spicy } from "./providers/Spicy";
+import { Unison } from "./providers/Unison";
 import { Env } from "./types";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -75,6 +77,7 @@ openapi.post("/v2/lyrics", LyricsV2);
 openapi.post("/verify-turnstile", VerifyTurnstile);
 openapi.post("/revalidate", RevalidateCache);
 openapi.delete("/cache", DeleteCache);
+openapi.post("/unison/invalidate", UnisonInvalidate);
 
 // Manual route for assets
 app.get("/challenge", (c) => {
@@ -97,5 +100,6 @@ export default {
     },
     scheduled: async (_controller: ScheduledController, env: Env, ctx: ExecutionContext) => {
         ctx.waitUntil(new Spicy(env).purgeExpired().then(deleted => console.log(JSON.stringify({ spicyPurgedRows: deleted }))));
+        ctx.waitUntil(new Unison(env).purgeExpired().then(deleted => console.log(JSON.stringify({ unisonPurgedRows: deleted }))));
     }
 };

@@ -4,6 +4,7 @@ import { LyricsService } from "../services/LyricsService";
 import { AppContext, StreamingEvent } from "../types";
 import { observe } from "../observability";
 import { verifyJwt, jwtFailureMessage } from "../auth";
+import { isValidVideoId, normalizeUnisonKeyId, Unison } from "../providers/Unison";
 
 export class LyricsV2 extends OpenAPIRoute {
     schema: OpenAPIRouteSchema = {
@@ -26,6 +27,8 @@ export class LyricsV2 extends OpenAPIRoute {
                             duration: z.string().optional(),
                             alwaysFetchMetadata: z.string().optional(),
                             isrc: z.string().optional().describe("ISRC code (for Binimum provider)"),
+                            unison: z.string().optional().describe("Set to 1 to stream Unison lyrics as `unison` provider events"),
+                            unisonKeyId: z.string().optional().describe("Caller's Unison key id, forwarded so the personal lookup can include their vote and variants"),
                             token: z.string().describe("JWT token"),
                         })
                     }
@@ -74,13 +77,6 @@ export class LyricsV2 extends OpenAPIRoute {
             if (typeof value === 'string') params.append(field, value);
         }
 
-        const cacheUrl = new URL(request.url);
-        cacheUrl.search = params.toString();
-        const cacheKey = cacheUrl.toString();
-
-        const cache = caches.default;
-        const cachedResponse = await cache.match(cacheKey);
-
         const { readable, writable } = new TransformStream();
         const writer = writable.getWriter();
         const encoder = new TextEncoder();
@@ -94,6 +90,28 @@ export class LyricsV2 extends OpenAPIRoute {
             });
             return writePromise;
         };
+
+        // Unison is personalized, so it runs beside the provider pipeline and never enters the cached result.
+        // Its events may follow `done` (which marks the providers as finished); the stream closes once both are through.
+        const videoId = params.get('videoId');
+        const unisonTask = form.unison === '1' && isValidVideoId(videoId)
+            ? new Unison(env).stream(
+                videoId,
+                normalizeUnisonKeyId(form.unisonKeyId),
+                results => sendEvent({ type: 'provider', data: { provider: 'unison', results } }),
+                promise => c.executionCtx.waitUntil(promise),
+            ).catch(e => {
+                console.error("Unison stream error:", e);
+                observe({ unisonStreamError: e?.message ?? String(e) });
+            })
+            : Promise.resolve();
+
+        const cacheUrl = new URL(request.url);
+        cacheUrl.search = params.toString();
+        const cacheKey = cacheUrl.toString();
+
+        const cache = caches.default;
+        const cachedResponse = await cache.match(cacheKey);
 
         if (cachedResponse) {
              observe({ usingCachedLyrics: true, v2: true });
@@ -151,6 +169,8 @@ export class LyricsV2 extends OpenAPIRoute {
                     observe({ streamingCachedResponseError: e });
                     console.error("Error streaming cached response:", e);
                 } finally {
+                    await unisonTask;
+                    await writePromise;
                     await writer.close();
                 }
              })());
@@ -188,6 +208,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 console.error("Streaming error:", e);
                 await sendEvent({ type: 'error', data: { message: e.message || "Internal Error" } });
             } finally {
+                await unisonTask;
                 await writePromise;
                 await writer.close();
             }

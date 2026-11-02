@@ -40,6 +40,9 @@ export interface Env extends Omit<Cloudflare.Env, "DB"> {
     GO_API_KEY: string;
     SPICY_API_KEY: string;
     SPICY_TOKEN_API_KEY: string;
+    UNISON_INVALIDATE_SECRET?: string;
+    UNISON_API_URL?: string;
+    UNISON_API_KEY?: string; // sent as x-blyrics-api-key so Unison skips its per-IP read limit
     ALLOWED_ORIGINS: string;
     LYRICS_BUCKET: R2Bucket;
 }
