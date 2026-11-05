@@ -58,14 +58,21 @@ function syllableSpans(syllables: SpicySyllable[], wrapInParens: boolean): strin
     }).join('');
 }
 
+function byStartTime(a: { StartTime: number }, b: { StartTime: number }): number {
+    return a.StartTime - b.StartTime;
+}
+
+function syllableLineBegin(line: SpicySyllableLine): number {
+    return Math.min(line.Lead.StartTime, ...(line.Background ?? []).map(group => group.StartTime));
+}
+
 function syllableLine(line: SpicySyllableLine): string {
-    const background = line.Background ?? [];
-    const begin = Math.min(line.Lead.StartTime, ...background.map(group => group.StartTime));
+    const background = [...(line.Background ?? [])].sort(byStartTime);
     const end = Math.max(line.Lead.EndTime, ...background.map(group => group.EndTime));
     const backgroundSpans = background
         .map(group => `<span ttm:role="x-bg">${syllableSpans(group.Syllables, true)}</span>`)
         .join('');
-    return `<p begin="${time(begin)}" end="${time(end)}" ttm:agent="${agent(line)}">${syllableSpans(line.Lead.Syllables, false)}${backgroundSpans}</p>`;
+    return `<p begin="${time(syllableLineBegin(line))}" end="${time(end)}" ttm:agent="${agent(line)}">${syllableSpans(line.Lead.Syllables, false)}${backgroundSpans}</p>`;
 }
 
 function lineLine(line: SpicyLineLine): string {
@@ -76,8 +83,8 @@ export function spicyToTtml(body: SpicyLyricsBody): string | null {
     if (body.Type === 'Static' || body.Content.length === 0) return null;
 
     const lines = body.Type === 'Syllable'
-        ? body.Content.map(syllableLine)
-        : body.Content.map(lineLine);
+        ? [...body.Content].sort((a, b) => syllableLineBegin(a) - syllableLineBegin(b)).map(syllableLine)
+        : [...body.Content].sort(byStartTime).map(lineLine);
     const songwriters = (body.SongWriters ?? [])
         .map(name => `<songwriter>${escapeXml(name)}</songwriter>`)
         .join('');
