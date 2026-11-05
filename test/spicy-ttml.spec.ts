@@ -109,6 +109,29 @@ describe('spicyToTtml', () => {
         expect(ttml).toContain('<p begin="1.000" end="3.000" ttm:agent="v1">');
     });
 
+    it('regression: emits lines and background vocals in time order when Spicy lists them out of order', () => {
+        const group = (text: string, start: number, end: number) => ({
+            Syllables: [{ Text: text, StartTime: start, EndTime: end }],
+            StartTime: start,
+            EndTime: end,
+        });
+        const ttml = spicyToTtml({
+            Type: 'Syllable',
+            Content: [
+                { Type: 'Vocal', Lead: group('stretch', 85, 88) },
+                { Type: 'Vocal', Lead: group('what', 90, 91.4) },
+                {
+                    Type: 'Vocal',
+                    Lead: group('play', 88.2, 91.2),
+                    Background: [group('later', 90.5, 91), group('earlier', 88.3, 89)],
+                },
+            ],
+        })!;
+
+        expect([...ttml.matchAll(/<p begin="([\d.]+)"/g)].map(match => match[1])).toEqual(['85.000', '88.200', '90.000']);
+        expect(ttml.indexOf('(earlier)')).toBeLessThan(ttml.indexOf('(later)'));
+    });
+
     it('returns null for static or empty lyrics', () => {
         expect(spicyToTtml({ Type: 'Static' })).toBeNull();
         expect(spicyToTtml({ Type: 'Syllable', Content: [] })).toBeNull();
