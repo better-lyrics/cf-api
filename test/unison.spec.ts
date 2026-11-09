@@ -55,14 +55,14 @@ describe('Unison stream', () => {
         ]);
     });
 
-    it('caches a 404 as a shared miss', async () => {
+    it('does not send a cached 404 ahead of the personal lookup', async () => {
         mockUnison('missing', 404);
         expect(await runStream('missing')).toEqual([{ stage: 'personal', found: false }]);
+        expect(await new Unison(testEnv).getShared('missing')).toEqual({ found: false });
 
-        mockUnison('missing', 404);
+        mockUnison('missing', 200, { success: true, data: { ...primary, variant: 'own' } });
         expect(await runStream('missing')).toEqual([
-            { stage: 'shared', found: false },
-            { stage: 'personal', found: false },
+            { stage: 'personal', found: true, data: { ...primary, variant: 'own' } },
         ]);
     });
 

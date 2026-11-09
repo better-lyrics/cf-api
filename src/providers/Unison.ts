@@ -23,7 +23,6 @@ type UnisonLookup =
 
 export type UnisonEventResults =
     | { stage: "shared"; found: true; data: UnisonLyrics }
-    | { stage: "shared"; found: false }
     | { stage: "personal"; found: true; unchanged?: true; data: UnisonLyrics }
     | { stage: "personal"; found: false }
     | { stage: "personal"; error: true };
@@ -127,8 +126,10 @@ export class Unison {
     }
 
     /**
-     * Emits up to two events: `shared` from our cache (only on a hit), then `personal` from a live
-     * Unison lookup with the caller's key. `personal` omits `lyrics` when they match what `shared` sent.
+     * Emits up to two events: `shared` from our cache (only when it holds a lyric), then `personal` from
+     * a live Unison lookup with the caller's key. `personal` omits `lyrics` when they match what `shared`
+     * sent. A cached 404 is never sent: it can predate a lyric, or hide one only this caller is served,
+     * and a client that showed "no lyrics" from it would then swap lyrics in.
      */
     async stream(
         videoId: string,
@@ -144,8 +145,8 @@ export class Unison {
 
         const shared = await this.getShared(videoId);
         observe({ unisonSharedHit: shared !== null });
-        if (shared) {
-            await emit(shared.found ? { stage: "shared", found: true, data: shared.data } : { stage: "shared", found: false });
+        if (shared?.found) {
+            await emit({ stage: "shared", found: true, data: shared.data });
         }
 
         const personal = await personalPromise;
