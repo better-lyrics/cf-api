@@ -1,7 +1,7 @@
 -- Migration number: 0001 	 2025-09-08T21:40:00.816Z
 CREATE TABLE tracks (
     id INTEGER PRIMARY KEY,
-    musixmatch_track_id INTEGER NOT NULL UNIQUE,
+    external_track_id INTEGER NOT NULL UNIQUE,
     last_accessed_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
