@@ -224,12 +224,6 @@ components:
         description:
           type: string
           nullable: true
-        musixmatchWordByWordLyrics:
-          type: string
-          nullable: true
-        musixmatchSyncedLyrics:
-          type: string
-          nullable: true
         lrclibSyncedLyrics:
           type: string
           nullable: true

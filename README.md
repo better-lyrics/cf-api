@@ -1,19 +1,17 @@
 # Cloudflare Lyrics Fetcher Worker
 
-This Cloudflare Worker fetches song lyrics by utilizing the YouTube API (for metadata from video IDs) and the Musixmatch
-and LrcLib APIs (for actual lyrics). It's designed to infer song details from a YouTube video ID and then retrieve
-corresponding lyrics, with an option for enhanced, word-by-word synchronized lyrics from Musixmatch.
+This Cloudflare Worker fetches song lyrics by utilizing the YouTube API (for metadata from video IDs) and several
+lyrics providers (LrcLib, the Boidu lyrics APIs, Binimum, and Spicy Lyrics). It's designed to infer song details from a
+YouTube video ID and then retrieve corresponding lyrics.
 
 ## Features
 
 * **YouTube Video ID Input**: Primarily uses a YouTube video ID to identify a song.
 * **Metadata Extraction**: Fetches video details from the YouTube API to determine song title, artist, album (if
   possible), and duration.
-* **Musixmatch Integration**: Communicates with the Musixmatch API to find and retrieve lyrics.
 * **LrcLib Integration**: Uses the LrcLib API as an alternative or supplementary source for lyrics.
 * **LRC Format Lyrics**: Provides lyrics in the standard LRC (timed lyrics) format.
-* **Word-by-Word Sync**: Offers word-by-word synchronized lyrics from Musixmatch.
-* **Caching**: Implements multiple layers of caching (YouTube API responses, Musixmatch API responses, final lyrics
+* **Caching**: Implements multiple layers of caching (YouTube API responses, provider lyrics in D1/R2, final lyrics
   responses) to improve performance and reduce external API calls.
 * **Authentication**: Protects the API using Cloudflare Turnstile and JWTs to prevent abuse.
 
@@ -40,21 +38,15 @@ When a request is made to the worker:
       YouTube)
     * If essential song details (song title and artist) cannot be determined, it returns a 400 error if they aren't
       provided in the API call.
-4. **Lyric Fetching (`Musixmatch.ts`, `LrcLib.ts`)**:
-    * A request is sent to LrcLib to fetch lyrics.
-    * The `Musixmatch.ts` class manages all communication with the Musixmatch API.
-    * **Token Management**: It handles the acquisition and refreshing of a `usertoken` required for Musixmatch API
-      calls. Tokens and API responses are cached. It also manages cookies returned by Musixmatch.
-    * **Track Matching**: It searches for the track on Musixmatch using the artist, song, and album information (derived
+4. **Lyric Fetching (`src/providers/`)**:
+    * Requests are sent to each lyrics provider in parallel, using the artist, song, album, and duration (derived
       from YouTube metadata or provided as optional query parameters).
-    * **Lyric Fetching**:
-        * It fetches word-by-word synchronized lyrics ("richsync") and standard LRC lyrics from Musixmatch.
-        * If no lyrics are found, the lyrics field in the response will be `null`.
+    * If a provider finds no lyrics, its field in the response will be `null`.
 5. **Response Generation (`GetLyrics.ts` & `index.ts`)**:
     * A JSON response is constructed containing the determined song `artist`, `song` title, `album` (if found),
       `duration`, the `videoId`, the original YouTube `description` (if relevant), the fetched `lyrics` (as an LRC
       formatted string or `null`), and `debugInfo`.
-    * The response will also contain separate fields for Musixmatch and LrcLib lyrics.
+    * The response contains a separate field for each provider's lyrics.
     * This final response is cached. Responses containing lyrics are cached for up to 3 days (`max-age=259200`), while
       responses without lyrics are cached for 10 minutes (`max-age=600`).
     * The `index.ts` worker sets appropriate HTTP headers (including `Access-Control-Allow-Origin`) and returns the
@@ -96,10 +88,10 @@ When a request is made to the worker:
 * `videoId` (string, **required**): The YouTube video ID for the song.
     * Example: `dQw4w9WgXcQ`
 * `artist` (string, optional): The artist of the song. If provided, it can be used as a fallback or to refine the
-  Musixmatch search, though data from the YouTube `videoId` often takes precedence for inference.
+  provider searches, though data from the YouTube `videoId` often takes precedence for inference.
 * `song` (string, optional): The title of the song. Similar to `artist`, it can be used as a fallback or to refine
   search.
-* `album` (string, optional): The album of the song. Used to improve Musixmatch search accuracy.
+* `album` (string, optional): The album of the song. Used to improve search accuracy.
 * `duration` (string, optional): The duration of the song in seconds. Can be inferred from `videoId`.
 * `alwaysFetchMetadata` (boolean, optional, default: `false`): If set to `true`, the worker will always fetch metadata from YouTube, even if song, artist, and album are provided.
 
@@ -119,20 +111,6 @@ When a request is made to the worker:
     "parsedSongAndArtist": "Almost Forgot · Against The Current",
     "videoId": "Y4gOQSZg5bQ",
     "description": "Provided to YouTube by Fueled By Ramen...",
-    "debugInfo": {
-        "lyricMatchingStats": {
-            "mean": -0.015,
-            "variance": 0.000025,
-            "samples": [
-                ...
-            ],
-            "diff": [
-                ...
-            ]
-        }
-    },
-    "musixmatchWordByWordLyrics": "[offset:-0.015]\n[00:00.24] Oh, oh, oh...",
-    "musixmatchSyncedLyrics": "[00:00.24]Oh, oh, oh...",
     "lrclibSyncedLyrics": "[00:00.24]Oh, oh, oh...",
     "lrclibPlainLyrics": "Oh, oh, oh..."
 }
@@ -210,3 +188,17 @@ or
    For example (with authentication):
    `curl -H "Authorization: Bearer YOUR_JWT" "http://localhost:8787/lyrics?videoId=Qd_Zcmlf4g4"`
    
+
+## Purging Musixmatch Data
+
+Musixmatch is no longer a provider. To remove its leftover cache from production D1 and R2 (the `lyrics`,
+`tracks`, and `track_mappings` tables, `youtube_music` rows in `negative_mappings`, and the R2 objects they point
+to), set `CLOUDFLARE_API_TOKEN` to a token with "D1: Edit" and "Workers R2 Storage: Edit", then run:
+
+```bash
+npm run purge:musixmatch                 # dry run: counts only
+npm run purge:musixmatch -- --confirm    # delete
+```
+
+Add `--scan-bucket` to also list the whole bucket for orphaned Musixmatch objects, or `--local` to run against local
+`wrangler dev` state. See `scripts/purge-musixmatch.mjs` for details. The deletion is resumable.

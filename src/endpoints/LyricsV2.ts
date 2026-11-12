@@ -142,12 +142,6 @@ export class LyricsV2 extends OpenAPIRoute {
                             results: { synced: result.lrclibSyncedLyrics, plain: result.lrclibPlainLyrics }
                         }});
                     }
-                    if (result.musixmatchSyncedLyrics || result.musixmatchWordByWordLyrics) {
-                        await sendEvent({ type: 'provider', data: {
-                            provider: 'musixmatch',
-                            results: { synced: result.musixmatchSyncedLyrics, wordByWord: result.musixmatchWordByWordLyrics }
-                        }});
-                    }
                     if (result.goLyricsApiLyrics) {
                         await sendEvent({ type: 'provider', data: { provider: 'golyrics', results: { lyrics: result.goLyricsApiLyrics } }});
                     }
@@ -197,7 +191,7 @@ export class LyricsV2 extends OpenAPIRoute {
                 if (fullResult) {
                     // Cache the full result for future requests (v1 or v2)
                     const cacheResponse = Response.json(fullResult);
-                    if (fullResult.musixmatchSyncedLyrics || fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics || fullResult.binimumLyrics || fullResult.spicyLyrics) {
+                    if (fullResult.lrclibSyncedLyrics || fullResult.goLyricsApiLyrics || fullResult.qqLyricsApiLyrics || fullResult.kugouLyricsApiLyrics || fullResult.binimumLyrics || fullResult.spicyLyrics) {
                         cacheResponse.headers.set('Cache-control', 'public; max-age=1080');
                     } else {
                         cacheResponse.headers.set("Cache-control", "public; max-age=600");
