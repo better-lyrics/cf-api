@@ -188,17 +188,3 @@ or
    For example (with authentication):
    `curl -H "Authorization: Bearer YOUR_JWT" "http://localhost:8787/lyrics?videoId=Qd_Zcmlf4g4"`
    
-
-## Purging Musixmatch Data
-
-Musixmatch is no longer a provider. To remove its leftover cache from production D1 and R2, set
-`CLOUDFLARE_API_TOKEN` to a token with "D1: Edit" and "Workers R2 Storage: Edit", then run:
-
-```bash
-npm run purge:musixmatch                 # dry run: counts only
-npm run purge:musixmatch -- --confirm    # delete the R2 objects and youtube_music negative_mappings rows
-npx wrangler d1 migrations apply lyrics --remote   # drop the lyrics, tracks, and track_mappings tables
-```
-
-Add `--scan-bucket` to also list the whole bucket for orphaned Musixmatch objects, or `--local` to run against local
-`wrangler dev` state. See `scripts/purge-musixmatch.mjs` for details. The deletion is resumable.

@@ -7,14 +7,12 @@
         "dev": "wrangler dev",
         "start": "wrangler dev",
         "cf-typegen": "wrangler types",
-        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
-        "purge:musixmatch": "node scripts/purge-musixmatch.mjs"
+        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
     },
     "devDependencies": {
         "@types/node": "^25.0.9",
         "@typescript-eslint/eslint-plugin": "^8.21.0",
         "@typescript-eslint/parser": "^8.21.0",
-        "aws4fetch": "^1.0.20",
         "eslint": "^9.19.0",
         "typescript": "^5.5.2",
         "typescript-eslint": "^8.21.0",
