@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// Deletes every piece of cached Musixmatch data from the production D1 database and
-// R2 bucket configured in wrangler.toml:
+// Deletes the cached Musixmatch data that a migration can't, from the production D1 database
+// and R2 bucket configured in wrangler.toml:
 //   - R2 objects `<musixmatchTrackId>/{rich_sync,normal_sync}.gz` (keys come from the D1 `lyrics` table)
-//   - D1 rows in `lyrics`, `track_mappings`, `tracks`
-//   - D1 rows in `negative_mappings` with source_platform = 'youtube_music' (Musixmatch's negative cache)
+//   - D1 rows in `negative_mappings` with source_platform = 'youtube_music' (Musixmatch's negative cache,
+//     in a table shared with other providers)
+// The Musixmatch-only tables (`lyrics`, `track_mappings`, `tracks`) are dropped afterwards by
+// migrations/0016_drop_musixmatch_tables.sql: `npx wrangler d1 migrations apply lyrics --remote`.
 // Data cached for other providers is left alone.
 //
 // Usage:
@@ -18,7 +20,8 @@
 // R2 is reached through its S3 API, whose credentials are derived from that token.
 // Set R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY to use a separate R2 key pair instead.
 //
-// The deletion is resumable: if it stops partway, run it again.
+// The deletion is resumable: if it stops partway, run it again. It pauses between write batches
+// so live traffic on the same database isn't starved.
 
 import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -41,7 +44,8 @@ const local = args.includes('--local');
 // R2 deletes at most 1000 keys per request; each D1 page feeds several of those in parallel.
 const R2_BATCH = 1000;
 const LYRICS_PAGE = 5000;
-const D1_DELETE_BATCH = 10000;
+const D1_DELETE_BATCH = 5000;
+const PAUSE_MS = local ? 0 : 500;
 // Musixmatch keys are `<numeric track id>/<format>.gz`. Every other provider uses
 // `<videoId>/<provider>_ttml.gz` or `<videoId>/lrclib.gz`, so this cannot match them.
 const MUSIXMATCH_KEY = /^\d+\/(rich_sync|normal_sync)\.gz$/;
@@ -57,8 +61,8 @@ async function withRetry(label, fn) {
         try {
             return await fn();
         } catch (error) {
-            if (attempt >= 6 || error.retryable === false) throw error;
-            const delay = Math.min(30_000, 1000 * 2 ** attempt);
+            if (attempt >= 10 || error.retryable === false) throw error;
+            const delay = Math.min(60_000, 1000 * 2 ** attempt);
             console.warn(`  ${label} failed (${error.message}); retrying in ${delay / 1000}s`);
             await new Promise(r => setTimeout(r, delay));
         }
@@ -181,6 +185,8 @@ async function localBackend(config) {
     };
 }
 
+const pause = () => new Promise(r => setTimeout(r, PAUSE_MS));
+
 async function deleteInBatches(backend, table, where = '1 = 1') {
     let total = 0;
     for (;;) {
@@ -190,6 +196,7 @@ async function deleteInBatches(backend, table, where = '1 = 1') {
         total += changes;
         if (changes === 0) return total;
         console.log(`  deleted ${total} ${table} rows`);
+        await pause();
     }
 }
 
@@ -210,15 +217,20 @@ async function main() {
         console.log(`Target: ${backend.target}`);
         console.log(confirm ? 'Mode: DELETE' : 'Mode: dry run (pass --confirm to delete)');
 
-        const { results: [counts] } = await backend.query(`SELECT
-            (SELECT COUNT(*) FROM lyrics) AS lyrics,
-            (SELECT COUNT(*) FROM track_mappings) AS track_mappings,
-            (SELECT COUNT(*) FROM tracks) AS tracks,
-            (SELECT COUNT(*) FROM negative_mappings WHERE source_platform = 'youtube_music') AS negative_mappings`);
+        const { results: tables } = await backend.query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('lyrics', 'track_mappings', 'tracks')");
+        const hasLyrics = tables.some(t => t.name === 'lyrics');
+        const counts = {};
+        for (const { name } of tables) {
+            counts[name] = (await backend.query(`SELECT COUNT(*) AS n FROM ${name}`)).results[0].n;
+        }
+        counts.negative_mappings = (await backend.query(
+            "SELECT COUNT(*) AS n FROM negative_mappings WHERE source_platform = 'youtube_music'")).results[0].n;
         console.log('Musixmatch rows in D1 (each lyrics row is one R2 object):');
         console.table(counts);
+        if (!hasLyrics) console.log('The lyrics table is gone, so R2 keys can only be found with --scan-bucket.');
 
-        if (confirm) {
+        if (confirm && hasLyrics) {
             // R2 objects first, then their lyrics rows, so the key list is never lost
             // before the objects it points at are gone.
             let deletedObjects = 0;
@@ -232,11 +244,10 @@ async function main() {
                     backend.query('DELETE FROM lyrics WHERE id <= ?', [results.at(-1).id]));
                 deletedObjects += results.length;
                 console.log(`  deleted ${deletedObjects}/${counts.lyrics} R2 objects and lyrics rows`);
+                await pause();
             }
-
-            // track_mappings references tracks, so it goes first.
-            await deleteInBatches(backend, 'track_mappings');
-            await deleteInBatches(backend, 'tracks');
+        }
+        if (confirm) {
             await deleteInBatches(backend, 'negative_mappings', "source_platform = 'youtube_music'");
         }
 
@@ -258,6 +269,9 @@ async function main() {
         }
 
         console.log(confirm ? 'Done.' : 'Dry run complete. Nothing was deleted.');
+        if (confirm && tables.length > 0) {
+            console.log('Next: drop the Musixmatch tables with `npx wrangler d1 migrations apply lyrics --remote`.');
+        }
     } finally {
         await backend.dispose();
     }
