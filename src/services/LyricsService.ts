@@ -1,6 +1,5 @@
 import { Env } from '../types';
 import { MetadataService } from './MetadataService';
-import { Musixmatch } from '../providers/Musixmatch';
 import { BoiduLyricsApi } from '../providers/BoiduLyricsApi';
 import { Binimum } from '../providers/Binimum';
 import { Spicy } from '../providers/Spicy';
@@ -10,7 +9,6 @@ import { isTruthy, sleep } from '../utils';
 
 export class LyricsService {
     private metadataService: MetadataService;
-    private musixmatch: Musixmatch;
     private goLyrics: BoiduLyricsApi;
     private qqLyrics: BoiduLyricsApi;
     private kugouLyrics: BoiduLyricsApi;
@@ -22,7 +20,6 @@ export class LyricsService {
     constructor(env: Env) {
         this.env = env;
         this.metadataService = new MetadataService(env);
-        this.musixmatch = new Musixmatch(env);
         this.goLyrics = new BoiduLyricsApi(env, 'golyrics', 'https://lyrics-api.boidu.dev/getLyrics');
         this.qqLyrics = new BoiduLyricsApi(env, 'qq', 'https://lyrics-api.boidu.dev/qq/getLyrics');
         this.kugouLyrics = new BoiduLyricsApi(env, 'kugou', 'https://lyrics-api.boidu.dev/kugou/getLyrics');
@@ -44,9 +41,6 @@ export class LyricsService {
         if (!videoId) {
              throw new Error("Invalid Video Id");
         }
-
-        // Token Promise
-        const tokenPromise = this.musixmatch.getToken();
 
         let artists: string[] = [];
         if (artist) {
@@ -85,8 +79,6 @@ export class LyricsService {
             parsedSongAndArtist,
             videoId,
             description,
-            musixmatchWordByWordLyrics: null as any,
-            musixmatchSyncedLyrics: null as any,
             lrclibSyncedLyrics: null as any,
             lrclibPlainLyrics: null as any,
             goLyricsApiTtml: null as any,
@@ -120,19 +112,6 @@ export class LyricsService {
 
             const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(5500)]);
 
-            // Musixmatch
-            let mxmError = null;
-            const musixmatchLyrics = this.musixmatch.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise)
-                .then(lyrics => {
-                    if (lyrics) {
-                        response.musixmatchWordByWordLyrics = lyrics.richSynced;
-                        response.musixmatchSyncedLyrics = lyrics.synced;
-                    }
-                })
-                .catch(e => {
-                    mxmError = e;
-                });
-
             // Boidu sources
             const boiduPromises = [];
             if (duration) {
@@ -160,7 +139,7 @@ export class LyricsService {
                 }));
             }
 
-            await Promise.all([...boiduPromises, musixmatchLyrics]);
+            await Promise.all(boiduPromises);
 
             let lrcLibTimeout;
             if (response.goLyricsApiTtml || response.qqLyricsApiLyrics || response.kugouLyricsApiLyrics) {
@@ -171,19 +150,15 @@ export class LyricsService {
             await Promise.race([lrcLibPromiseRace, sleep(lrcLibTimeout)]);
 
             foundStats.push({
-                'hasWordByWord': isTruthy(response.musixmatchWordByWordLyrics),
                 'hasLrcLibSynced': isTruthy(response.lrclibSyncedLyrics),
-                'hasMusixmatchSynced': isTruthy(response.musixmatchSyncedLyrics),
                 'hasLrcLibPlain': isTruthy(response.lrclibPlainLyrics),
                 'hasGoLyricsApiTtml': isTruthy(response.goLyricsApiTtml),
                 'hasQqLyricsApiLyrics': isTruthy(response.qqLyricsApiLyrics),
                 'hasKugouLyricsApiLyrics': isTruthy(response.kugouLyricsApiLyrics),
                 'hasBinimumTtml': isTruthy(response.binimumTtml),
-                'musixMatchError': mxmError
             });
 
-            if (isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.musixmatchSyncedLyrics) ||
-                isTruthy(response.goLyricsApiTtml) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics) ||
+            if (isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.goLyricsApiTtml) || isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics) ||
                 isTruthy(response.binimumTtml)) {
                 response.song = combo.song;
                 response.artist = combo.artist;
@@ -192,8 +167,7 @@ export class LyricsService {
             }
         }
 
-        const hasAnySynced = isTruthy(response.musixmatchWordByWordLyrics) || isTruthy(response.lrclibSyncedLyrics) ||
-                             isTruthy(response.musixmatchSyncedLyrics) || isTruthy(response.goLyricsApiTtml) ||
+        const hasAnySynced = isTruthy(response.lrclibSyncedLyrics) || isTruthy(response.goLyricsApiTtml) ||
                              isTruthy(response.qqLyricsApiLyrics) || isTruthy(response.kugouLyricsApiLyrics) ||
                              isTruthy(response.binimumTtml);
 
@@ -202,7 +176,6 @@ export class LyricsService {
             foundStats: foundStats,
             foundSyncedLyrics: hasAnySynced,
             foundPlainLyrics: isTruthy(response.lrclibPlainLyrics),
-            foundRichSyncedLyrics: isTruthy(response.musixmatchSyncedLyrics),
             foundLyrics: hasAnySynced || isTruthy(response.lrclibPlainLyrics),
             response: response
         });
@@ -221,9 +194,6 @@ export class LyricsService {
         if (!videoId) {
             throw new Error("Invalid Video Id");
         }
-
-        // Token Promise (start early)
-        const tokenPromise = this.musixmatch.getToken();
 
         let artists: string[] = [];
         if (artist) {
@@ -257,8 +227,6 @@ export class LyricsService {
 
         const fullResponse: any = {
             song, artist, album, duration, videoId,
-            musixmatchWordByWordLyrics: null,
-            musixmatchSyncedLyrics: null,
             lrclibSyncedLyrics: null,
             lrclibPlainLyrics: null,
             goLyricsApiLyrics: null,
@@ -295,28 +263,6 @@ export class LyricsService {
                 }
                 return lyrics;
             });
-
-        const lrcLibPromiseRace = Promise.race([lrcLibLyricsPromise, sleep(6000)]);
-
-        // Musixmatch
-        promises.push(this.musixmatch.getLrc(videoId, currentArtist, currentSong, currentAlbum, lrcLibPromiseRace, tokenPromise)
-            .then(lyrics => {
-                if (lyrics) {
-                    fullResponse.musixmatchWordByWordLyrics = lyrics.richSynced;
-                    fullResponse.musixmatchSyncedLyrics = lyrics.synced;
-                    onEvent({
-                        type: 'provider',
-                        data: {
-                            provider: 'musixmatch',
-                            results: { wordByWord: lyrics.richSynced, synced: lyrics.synced }
-                        }
-                    });
-                }
-            })
-            .catch(e => {
-                console.error("Musixmatch error:", e);
-                onEvent({ type: 'error', data: { message: `Musixmatch error: ${e.message}` } });
-            }));
 
         // Boidu sources
         if (duration) {
@@ -406,10 +352,6 @@ export class LyricsService {
             return { success: false, videoId, status, message: "Metadata insufficient for lyrics fetch and no overrides provided" };
         }
 
-        const tokenPromise = this.musixmatch.getToken(true).catch(e => {
-            status.musixmatch = { action: 'failed', error: e.message, timestamp: Math.floor(Date.now() / 1000) };
-        });
-
         const combo = { artist, song, album: album || null };
 
         // 2. LrcLib
@@ -420,18 +362,7 @@ export class LyricsService {
             error: lrcLibResult?.error
         };
 
-        // 3. Musixmatch
-        if (!status.musixmatch) { // If token fetch didn't already fail it
-            const lrcLibPromiseRace = Promise.resolve(lrcLibResult);
-            const mxmResult = await this.musixmatch.getLrc(videoId, combo.artist, combo.song, combo.album, lrcLibPromiseRace, tokenPromise as Promise<void>, true);
-            status.musixmatch = {
-                action: mxmResult?.action || 'failed',
-                timestamp: mxmResult?.timestamp,
-                error: mxmResult?.error
-            };
-        }
-
-        // 4. Boidu sources
+        // 3. Boidu sources
         if (duration) {
             const boiduParams = { song: combo.song, artist: combo.artist, album: combo.album, duration: duration, videoId: videoId };
 

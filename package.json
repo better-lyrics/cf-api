@@ -7,13 +7,14 @@
         "dev": "wrangler dev",
         "start": "wrangler dev",
         "cf-typegen": "wrangler types",
-        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\""
+        "lint": "eslint \"src/**/*.ts\" \"test/**/*.ts\"",
+        "purge:musixmatch": "node scripts/purge-musixmatch.mjs"
     },
     "devDependencies": {
-        "@types/diff": "^7.0.1",
         "@types/node": "^25.0.9",
         "@typescript-eslint/eslint-plugin": "^8.21.0",
         "@typescript-eslint/parser": "^8.21.0",
+        "aws4fetch": "^1.0.20",
         "eslint": "^9.19.0",
         "typescript": "^5.5.2",
         "typescript-eslint": "^8.21.0",
@@ -23,7 +24,6 @@
         "@cloudflare/vitest-pool-workers": "^0.8.68",
         "@types/pako": "^2.0.4",
         "chanfana": "^2.8.3",
-        "diff": "^7.0.0",
         "hono": "^4.11.3",
         "itty-router": "^5.0.22",
         "pako": "^2.1.0",

@@ -9,8 +9,6 @@ export const LyricsResponseSchema = z.object({
   parsedSongAndArtist: z.string().nullable(),
   videoId: z.string().nullable(),
   description: z.string().nullable(),
-  musixmatchWordByWordLyrics: z.any().nullable(),
-  musixmatchSyncedLyrics: z.any().nullable(),
   lrclibSyncedLyrics: z.any().nullable(),
   lrclibPlainLyrics: z.any().nullable(),
   goLyricsApiTtml: z.any().nullable(),
@@ -31,7 +29,6 @@ export interface Env extends Omit<Cloudflare.Env, "DB"> {
     REFETCH_THRESHOLD?: string; // seconds
     REFETCH_CHANCE?: string; // 0.0 to 1.0
     NEGATIVE_CACHE_TTL_LRCLIB?: string; // seconds
-    NEGATIVE_CACHE_TTL_MUSIXMATCH?: string; // seconds
     BYPASS_AUTH: string;
     JWT_SECRET: string;
     ADMIN_KEYS: string;
